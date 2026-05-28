@@ -18,7 +18,7 @@ int main() {
     int steps = static_cast<int>(duration / dt);
     double theta_deg = 8.0;
     double theta_dot_dps = 0.0;
-    std::ofstream csv("sim_stabilize_cpp.csv");
+    std::ofstream csv("sim_stabilize.csv");
     csv << "t,pitch_deg,gyro_dps,base_cmd\n";
     for (int i = 0; i <= steps; ++i) {
         double t = i * dt;
@@ -33,6 +33,6 @@ int main() {
         csv << t << "," << theta_deg << "," << theta_dot_dps << "," << base_cmd << "\n";
     }
     csv.close();
-    std::cout << "Simulation complete. Results in sim_stabilize_cpp.csv\n";
+    std::cout << "Simulation complete. Results in sim_stabilize.csv\n";
     return 0;
 }

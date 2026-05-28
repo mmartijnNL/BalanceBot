@@ -13,4 +13,4 @@ BalanceBotController.o: BalanceBotController.cpp BalanceBotController.h
 	$(CXX) $(CXXFLAGS) -c BalanceBotController.cpp
 
 clean:
-	rm -f *.o sim sim_stabilize_cpp.csv
+	rm -f *.o sim sim_stabilize.csv
