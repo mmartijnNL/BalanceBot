@@ -58,8 +58,8 @@ struct BalanceBotState {
     bool balancing_enabled;
 };
 
-void BalanceBot_init(const struct BalanceBotHAL* hal, struct BalanceBotConfig* cfg, struct BalanceBotState* state);
-void BalanceBot_update(struct BalanceBotConfig* cfg, struct BalanceBotState* state);
+void BalanceBot_init(const struct BalanceBotHardwareAbstractionLayer* hardware_abstraction_layer, struct BalanceBotConfiguration* configuration, struct BalanceBotState* state);
+void BalanceBot_update(struct BalanceBotConfiguration* configuration, struct BalanceBotState* state);
 
 #ifdef __cplusplus
 }

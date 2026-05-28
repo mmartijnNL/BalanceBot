@@ -42,7 +42,7 @@ float sim_get_pitch_degrees(void) { return (float)(sim_pitch_degrees + sim_pitch
 float sim_get_gyroscope_pitch_rate_degrees_per_second(void) { return (float)(sim_gyroscope_degrees_per_second + sim_gyroscope_noise_degrees_per_second); }
 float sim_get_battery_voltage(void) { return (float)sim_battery_voltage; }
 
-struct BalanceBotHAL sim_hal = {
+struct BalanceBotHardwareAbstractionLayer sim_hardware_abstraction_layer = {
     sim_milliseconds,
     sim_microseconds,
     sim_serial_print,
@@ -98,8 +98,8 @@ static void update_rc_profile(double time) {
 
 static void update_battery_model(double delta_time) {
     double effort = fabs(sim_left_motor_actual_voltage) + fabs(sim_right_motor_actual_voltage);
-    // Slowly decay battery with load; enough to exercise low voltage cutoff logic in a long run.
-    sim_battery_voltage -= (0.002 + 0.001 * effort) * delta_time;
+    // Decay to trigger low voltage cutoff near the end of simulation.
+    sim_battery_voltage -= (0.01 + 0.003 * effort) * delta_time;
     if (sim_battery_voltage < 12.0) sim_battery_voltage = 12.0;
 }
 
@@ -135,22 +135,22 @@ static void update_plant(double delta_time, double time) {
 }
 
 int main(void) {
-    struct BalanceBotConfig cfg;
+    struct BalanceBotConfiguration configuration;
     struct BalanceBotState state;
-    BalanceBot_init(&sim_hal, &cfg, &state);
+    BalanceBot_init(&sim_hardware_abstraction_layer, &configuration, &state);
 
     const double dt = 0.004;
     const double duration = 60.0;
     const int steps = (int)(duration / dt);
 
-    FILE* csv = fopen("sim_stabilize.csv", "w");
+    FILE* csv = fopen("simulation/sim_stabilize.csv", "w");
     if (!csv) {
-        fprintf(stderr, "Failed to open sim_stabilize.csv\n");
+        fprintf(stderr, "Failed to open simulation/sim_stabilize.csv\n");
         return 1;
     }
 
-        fprintf(csv,
-            "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active,kp_angle,ki_angle,kd_angle,kp_rate,ki_rate,kd_rate\n");
+    fprintf(csv,
+        "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active,kp_angle,ki_angle,kd_angle,kp_rate,ki_rate,kd_rate\n");
 
     for (int i = 0; i <= steps; ++i) {
         double time = i * dt;
@@ -160,30 +160,30 @@ int main(void) {
         update_rc_profile(time);
         update_sensor_noise(time);
 
-        BalanceBot_update(&cfg, &state);
+        BalanceBot_update(&configuration, &state);
 
         apply_motor_driver_dynamics(dt);
         update_plant(dt, time);
         update_battery_model(dt);
 
         // Optional autotune (simple gradient descent on squared error)
-        float error = (state.rcTargetAngleDeg - sim_pitch_degrees) * (state.rcTargetAngleDeg - sim_pitch_degrees);
+        float error = (state.rc_target_angle_degrees - sim_pitch_degrees) * (state.rc_target_angle_degrees - sim_pitch_degrees);
         static float prev_error = 0.0f;
         static bool autotune_enabled = true; // Set to false to disable autotune
         if (autotune_enabled) {
             float d_error = error - prev_error;
             float lr_p = 1e-4f, lr_i = 1e-6f, lr_d = 1e-6f;
             // Angle loop autotune
-            cfg.kp_angle -= lr_p * d_error;
-            cfg.ki_angle -= lr_i * d_error;
-            cfg.kd_angle -= lr_d * d_error;
+            configuration.proportional_gain_angle -= lr_p * d_error;
+            configuration.integral_gain_angle -= lr_i * d_error;
+            configuration.derivative_gain_angle -= lr_d * d_error;
             // Clamp
-            if (cfg.kp_angle < 0.0f) cfg.kp_angle = 0.0f;
-            if (cfg.kp_angle > 100.0f) cfg.kp_angle = 100.0f;
-            if (cfg.ki_angle < 0.0f) cfg.ki_angle = 0.0f;
-            if (cfg.ki_angle > 10.0f) cfg.ki_angle = 10.0f;
-            if (cfg.kd_angle < 0.0f) cfg.kd_angle = 0.0f;
-            if (cfg.kd_angle > 10.0f) cfg.kd_angle = 10.0f;
+            if (configuration.proportional_gain_angle < 0.0f) configuration.proportional_gain_angle = 0.0f;
+            if (configuration.proportional_gain_angle > 100.0f) configuration.proportional_gain_angle = 100.0f;
+            if (configuration.integral_gain_angle < 0.0f) configuration.integral_gain_angle = 0.0f;
+            if (configuration.integral_gain_angle > 10.0f) configuration.integral_gain_angle = 10.0f;
+            if (configuration.derivative_gain_angle < 0.0f) configuration.derivative_gain_angle = 0.0f;
+            if (configuration.derivative_gain_angle > 10.0f) configuration.derivative_gain_angle = 10.0f;
             prev_error = error;
         }
         fprintf(csv,
@@ -200,13 +200,13 @@ int main(void) {
             sim_battery_voltage,
             sim_rc_throttle,
             sim_rc_steer,
-            state.rcTargetAngleDeg,
-            state.rcSteeringCmd,
-            state.lvcActive ? 1 : 0,
-            cfg.kp_angle, cfg.ki_angle, cfg.kd_angle, cfg.kp_rate, cfg.ki_rate, cfg.kd_rate);
+            state.rc_target_angle_degrees,
+            state.rc_steering_command,
+            state.low_voltage_cutoff_active ? 1 : 0,
+            configuration.proportional_gain_angle, configuration.integral_gain_angle, configuration.derivative_gain_angle, configuration.proportional_gain_rate, configuration.integral_gain_rate, configuration.derivative_gain_rate);
     }
 
     fclose(csv);
-    printf("Simulation complete. Results in sim_stabilize.csv\n");
+    printf("Simulation complete. Results in simulation/sim_stabilize.csv\n");
     return 0;
 }
