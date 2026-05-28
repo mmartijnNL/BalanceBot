@@ -88,8 +88,57 @@ flowchart LR
 - `w<number>` set rate `ki`
 - `x<number>` set rate `kd`
 
+## Hardware-free simulation
+You can test the balance controller behavior on your computer without motors,
+encoders, or IMU connected.
+
+Simulation script:
+- `simulation/balancebot_sim.py`
+
+Run examples from project root:
+
+```bash
+python3 simulation/balancebot_sim.py --scenario stabilize
+python3 simulation/balancebot_sim.py --scenario rc_step
+python3 simulation/balancebot_sim.py --scenario disturbance
+python3 simulation/balancebot_sim.py --scenario fallover
+```
+
+Optional CSV output for plotting:
+
+```bash
+python3 simulation/balancebot_sim.py --scenario stabilize --csv sim_stabilize.csv
+```
+
+What it validates:
+- Uses the same PID structure and limits as `BalanceBot.ino`
+- Checks whether the controller settles pitch after startup/disturbance
+- Verifies safety cut behavior when tilt exceeds `MAX_TILT_DEG`
+
+Note:
+- The physics model is simplified and intended for control sanity checks.
+- A simulation pass does not replace real hardware tuning.
+
 ## Notes
 - Keep all grounds common (battery, driver, ESP32, sensors).
 - Verify voltage-sensor output never exceeds ESP32 ADC input max (3.3V).
 - ESP32 GPIO inputs are not 5V tolerant. If your receiver PWM outputs are 5V, use a level shifter or divider.
 - Start with low `DRIVER_VOLTAGE_LIMIT` for safe tuning.
+
+## 4S LiPo low-voltage cutoff (LVC)
+Firmware now includes a built-in LVC for 4S packs.
+
+Default settings in `BalanceBot.ino`:
+- `BATTERY_SERIES_CELLS = 4`
+- `LVC_CUTOFF_PER_CELL_V = 3.30` (trips at 13.20V pack)
+- `LVC_RECOVER_PER_CELL_V = 3.45` (clears at 13.80V pack)
+- `LVC_TRIP_DELAY_MS = 500` (must stay below cutoff for 0.5s)
+
+Behavior:
+- If filtered battery voltage remains below cutoff for the delay window, balancing is disabled and motor output is stopped.
+- Balancing cannot be enabled while LVC is active.
+- LVC clears only after voltage rises above the recovery threshold (hysteresis).
+
+Important:
+- Calibrate `VOLTAGE_DIVIDER_RATIO` before relying on cutoff values.
+- Under load, LiPo voltage sags; tune thresholds conservatively for your pack and current draw.

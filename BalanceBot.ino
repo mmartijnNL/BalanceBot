@@ -36,6 +36,13 @@ static constexpr float ADC_REF_VOLTAGE = 3.3f;
 static constexpr float ADC_MAX = 4095.0f;
 static constexpr float VOLTAGE_DIVIDER_RATIO = 5.0f; // e.g. 25V -> 5V module then scaled to 3.3V externally
 
+// LiPo low-voltage cutoff (LVC)
+static constexpr int BATTERY_SERIES_CELLS = 4;
+static constexpr float LVC_CUTOFF_PER_CELL_V = 3.30f;
+static constexpr float LVC_RECOVER_PER_CELL_V = 3.45f;
+static constexpr unsigned long LVC_TRIP_DELAY_MS = 500;
+static constexpr float LVC_FILTER_ALPHA = 0.08f;
+
 // I2C pins
 // Bus 0: MPU6050 + Left AS5600
 static constexpr int I2C0_SDA = 21;
@@ -107,6 +114,10 @@ float rcTargetAngleDeg = 0.0f;
 float rcSteeringCmd = 0.0f;
 bool rcSignalValid = false;
 
+float batteryVoltageFiltered = -1.0f;
+bool lvcActive = false;
+unsigned long lvcBelowSinceMs = 0;
+
 // =========================
 // Helpers
 // =========================
@@ -115,6 +126,45 @@ float readBatteryVoltage() {
   uint16_t raw = analogRead(BATTERY_ADC_PIN);
   float adcV = (raw / ADC_MAX) * ADC_REF_VOLTAGE;
   return adcV * VOLTAGE_DIVIDER_RATIO;
+}
+
+float lvcCutoffVoltage() {
+  return BATTERY_SERIES_CELLS * LVC_CUTOFF_PER_CELL_V;
+}
+
+float lvcRecoverVoltage() {
+  return BATTERY_SERIES_CELLS * LVC_RECOVER_PER_CELL_V;
+}
+
+void updateBatteryProtection() {
+  float vbatt = readBatteryVoltage();
+  if (batteryVoltageFiltered < 0.0f) {
+    batteryVoltageFiltered = vbatt;
+  } else {
+    batteryVoltageFiltered += LVC_FILTER_ALPHA * (vbatt - batteryVoltageFiltered);
+  }
+
+  unsigned long nowMs = millis();
+
+  if (!lvcActive) {
+    if (batteryVoltageFiltered <= lvcCutoffVoltage()) {
+      if (lvcBelowSinceMs == 0) {
+        lvcBelowSinceMs = nowMs;
+      }
+
+      if ((nowMs - lvcBelowSinceMs) >= LVC_TRIP_DELAY_MS) {
+        lvcActive = true;
+        balancingEnabled = false;
+        Serial.printf("LVC ACTIVE: batt=%.2fV cutoff=%.2fV\n", batteryVoltageFiltered, lvcCutoffVoltage());
+      }
+    } else {
+      lvcBelowSinceMs = 0;
+    }
+  } else if (batteryVoltageFiltered >= lvcRecoverVoltage()) {
+    lvcActive = false;
+    lvcBelowSinceMs = 0;
+    Serial.printf("LVC CLEARED: batt=%.2fV recover=%.2fV\n", batteryVoltageFiltered, lvcRecoverVoltage());
+  }
 }
 
 float normalizeRcUs(uint32_t pulseUs) {
@@ -209,6 +259,10 @@ void parseSerialCommands() {
 
   switch (cmd) {
     case 'e':
+      if (lvcActive) {
+        Serial.println("Cannot enable balancing: LVC is active");
+        break;
+      }
       balancingEnabled = true;
       angleInt = 0.0f;
       rateInt = 0.0f;
@@ -362,13 +416,14 @@ void runBalanceControl(float dt) {
 
   if (millis() - lastPrintMs > 100) {
     lastPrintMs = millis();
-    float vbatt = readBatteryVoltage();
+    float vbatt = batteryVoltageFiltered > 0.0f ? batteryVoltageFiltered : readBatteryVoltage();
     Serial.printf(
-      "pitch=%.2f rate=%.2f cmd=%.3f batt=%.2f en=%d\n",
+      "pitch=%.2f rate=%.2f cmd=%.3f batt=%.2f lvc=%d en=%d\n",
       pitchDeg,
       gyroPitchRateDegS,
       baseCmd,
       vbatt,
+      lvcActive ? 1 : 0,
       balancingEnabled ? 1 : 0
     );
   }
@@ -387,6 +442,13 @@ void setup() {
   pinMode(BATTERY_ADC_PIN, INPUT);
 
   setupSensorsAndMotors();
+
+  Serial.printf(
+    "Battery LVC: %dS cutoff=%.2fV recover=%.2fV\n",
+    BATTERY_SERIES_CELLS,
+    lvcCutoffVoltage(),
+    lvcRecoverVoltage()
+  );
 
   lastControlUs = micros();
   Serial.println("Type 'e' to enable balancing, 'D' to disable.");
@@ -407,12 +469,13 @@ void loop() {
   }
   lastControlUs = nowUs;
 
+  updateBatteryProtection();
   mpu.update();
   updateRcControl();
   float pitchDeg = mpu.getAngleX();
 
   // Hard safety cut if robot falls too far.
-  if (fabsf(pitchDeg) > MAX_TILT_DEG || !balancingEnabled) {
+  if (fabsf(pitchDeg) > MAX_TILT_DEG || !balancingEnabled || lvcActive) {
     stopMotors();
     angleInt = 0.0f;
     rateInt = 0.0f;
