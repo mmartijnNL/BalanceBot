@@ -140,7 +140,7 @@ int main(void) {
     BalanceBot_init(&sim_hal, &cfg, &state);
 
     const double dt = 0.004;
-    const double duration = 30.0;
+    const double duration = 60.0;
     const int steps = (int)(duration / dt);
 
     FILE* csv = fopen("sim_stabilize.csv", "w");
@@ -149,8 +149,8 @@ int main(void) {
         return 1;
     }
 
-    fprintf(csv,
-            "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active\n");
+        fprintf(csv,
+            "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active,kp_angle,ki_angle,kd_angle,kp_rate,ki_rate,kd_rate\n");
 
     for (int i = 0; i <= steps; ++i) {
         double t = i * dt;
@@ -166,23 +166,44 @@ int main(void) {
         update_plant(dt, t);
         update_battery_model(dt);
 
+        // Optional autotune (simple gradient descent on squared error)
+        float error = (state.rcTargetAngleDeg - sim_pitch_deg) * (state.rcTargetAngleDeg - sim_pitch_deg);
+        static float prev_error = 0.0f;
+        static bool autotune_enabled = true; // Set to false to disable autotune
+        if (autotune_enabled) {
+            float d_error = error - prev_error;
+            float lr_p = 1e-4f, lr_i = 1e-6f, lr_d = 1e-6f;
+            // Angle loop autotune
+            cfg.kp_angle -= lr_p * d_error;
+            cfg.ki_angle -= lr_i * d_error;
+            cfg.kd_angle -= lr_d * d_error;
+            // Clamp
+            if (cfg.kp_angle < 0.0f) cfg.kp_angle = 0.0f;
+            if (cfg.kp_angle > 100.0f) cfg.kp_angle = 100.0f;
+            if (cfg.ki_angle < 0.0f) cfg.ki_angle = 0.0f;
+            if (cfg.ki_angle > 10.0f) cfg.ki_angle = 10.0f;
+            if (cfg.kd_angle < 0.0f) cfg.kd_angle = 0.0f;
+            if (cfg.kd_angle > 10.0f) cfg.kd_angle = 10.0f;
+            prev_error = error;
+        }
         fprintf(csv,
-                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d\n",
-                t,
-                sim_pitch_deg,
-                sim_gyro_dps,
-                sim_pitch_deg + sim_pitch_noise_deg,
-                sim_gyro_dps + sim_gyro_noise_dps,
-                sim_left_motor_cmd_v,
-                sim_right_motor_cmd_v,
-                sim_left_motor_actual_v,
-                sim_right_motor_actual_v,
-                sim_battery_voltage,
-                sim_rc_throttle,
-                sim_rc_steer,
-                state.rcTargetAngleDeg,
-                state.rcSteeringCmd,
-                state.lvcActive ? 1 : 0);
+            "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            t,
+            sim_pitch_deg,
+            sim_gyro_dps,
+            sim_pitch_deg + sim_pitch_noise_deg,
+            sim_gyro_dps + sim_gyro_noise_dps,
+            sim_left_motor_cmd_v,
+            sim_right_motor_cmd_v,
+            sim_left_motor_actual_v,
+            sim_right_motor_actual_v,
+            sim_battery_voltage,
+            sim_rc_throttle,
+            sim_rc_steer,
+            state.rcTargetAngleDeg,
+            state.rcSteeringCmd,
+            state.lvcActive ? 1 : 0,
+            cfg.kp_angle, cfg.ki_angle, cfg.kd_angle, cfg.kp_rate, cfg.ki_rate, cfg.kd_rate);
     }
 
     fclose(csv);
