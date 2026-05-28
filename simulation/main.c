@@ -1,68 +1,177 @@
 #include "../BalanceBot.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <math.h>
-#include <stdint.h>
+#include <stdarg.h>
 #include <stdbool.h>
-#include <string.h>
+#include <stdint.h>
+#include <stdio.h>
 
-// --- Simulated hardware state ---
-static double sim_time_ms = 0;
-static double sim_pitch_deg = 8.0;
+// --- Simulated hardware and plant state ---
+static double sim_time_s = 0.0;
+static double sim_time_ms = 0.0;
+static double sim_pitch_deg = 10.0;
 static double sim_gyro_dps = 0.0;
-static double sim_battery_voltage = 16.0;
-static double sim_left_motor = 0.0, sim_right_motor = 0.0;
-static double sim_rc_throttle = 0.0, sim_rc_steer = 0.0;
+static double sim_pitch_noise_deg = 0.0;
+static double sim_gyro_noise_dps = 0.0;
+static double sim_battery_voltage = 16.8;
+static double sim_left_motor_cmd_v = 0.0;
+static double sim_right_motor_cmd_v = 0.0;
+static double sim_left_motor_actual_v = 0.0;
+static double sim_right_motor_actual_v = 0.0;
+static double sim_rc_throttle = 0.0;
+static double sim_rc_steer = 0.0;
 
-// --- HAL implementation ---
+// --- HAL implementation for BalanceBot.c ---
 uint32_t sim_millis(void) { return (uint32_t)sim_time_ms; }
-uint32_t sim_micros(void) { return (uint32_t)(sim_time_ms * 1000.0); }
+uint32_t sim_micros(void) { return (uint32_t)(sim_time_s * 1000000.0); }
 void sim_serial_print(const char* s) { printf("%s", s); }
-void sim_serial_printf(const char* fmt, ...) { va_list args; va_start(args, fmt); vprintf(fmt, args); va_end(args); }
-uint16_t sim_analog_read(int pin) { return 0; }
-void sim_motor_left_move(float v) { sim_left_motor = v; }
-void sim_motor_right_move(float v) { sim_right_motor = v; }
+void sim_serial_printf(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+uint16_t sim_analog_read(int pin) {
+    (void)pin;
+    return 0;
+}
+void sim_motor_left_move(float v) { sim_left_motor_cmd_v = (double)v; }
+void sim_motor_right_move(float v) { sim_right_motor_cmd_v = (double)v; }
 float sim_get_rc_throttle(void) { return (float)sim_rc_throttle; }
 float sim_get_rc_steer(void) { return (float)sim_rc_steer; }
-float sim_get_pitch_deg(void) { return (float)sim_pitch_deg; }
-float sim_get_gyro_pitch_rate_dps(void) { return (float)sim_gyro_dps; }
+float sim_get_pitch_deg(void) { return (float)(sim_pitch_deg + sim_pitch_noise_deg); }
+float sim_get_gyro_pitch_rate_dps(void) { return (float)(sim_gyro_dps + sim_gyro_noise_dps); }
 float sim_get_battery_voltage(void) { return (float)sim_battery_voltage; }
 
 struct BalanceBotHAL sim_hal = {
-    .millis = sim_millis,
-    .micros = sim_micros,
-    .serial_print = sim_serial_print,
-    .serial_printf = sim_serial_printf,
-    .analog_read = sim_analog_read,
-    .motor_left_move = sim_motor_left_move,
-    .motor_right_move = sim_motor_right_move,
-    .get_rc_throttle = sim_get_rc_throttle,
-    .get_rc_steer = sim_get_rc_steer,
-    .get_pitch_deg = sim_get_pitch_deg,
-    .get_gyro_pitch_rate_dps = sim_get_gyro_pitch_rate_dps,
-    .get_battery_voltage = sim_get_battery_voltage
+    sim_millis,
+    sim_micros,
+    sim_serial_print,
+    sim_serial_printf,
+    sim_analog_read,
+    sim_motor_left_move,
+    sim_motor_right_move,
+    sim_get_rc_throttle,
+    sim_get_rc_steer,
+    sim_get_pitch_deg,
+    sim_get_gyro_pitch_rate_dps,
+    sim_get_battery_voltage
 };
 
-int main() {
+static double clampd(double x, double lo, double hi) {
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+
+// Time-varying RC profile to test stabilization, tracking, and steering coupling.
+static void update_rc_profile(double t) {
+    if (t < 3.0) {
+        sim_rc_throttle = 0.0;
+        sim_rc_steer = 0.0;
+    } else if (t < 8.0) {
+        sim_rc_throttle = 0.20;
+        sim_rc_steer = 0.0;
+    } else if (t < 12.0) {
+        sim_rc_throttle = -0.12;
+        sim_rc_steer = 0.25;
+    } else if (t < 18.0) {
+        sim_rc_throttle = 0.05;
+        sim_rc_steer = -0.30;
+    } else {
+        sim_rc_throttle = 0.0;
+        sim_rc_steer = 0.0;
+    }
+}
+
+static void update_battery_model(double dt) {
+    double effort = fabs(sim_left_motor_actual_v) + fabs(sim_right_motor_actual_v);
+    // Slowly decay battery with load; enough to exercise LVC logic in a long run.
+    sim_battery_voltage -= (0.002 + 0.001 * effort) * dt;
+    if (sim_battery_voltage < 12.0) sim_battery_voltage = 12.0;
+}
+
+static void apply_motor_driver_dynamics(double dt) {
+    const double motor_tau_s = 0.030;
+    double alpha = dt / (motor_tau_s + dt);
+    sim_left_motor_cmd_v = clampd(sim_left_motor_cmd_v, -6.0, 6.0);
+    sim_right_motor_cmd_v = clampd(sim_right_motor_cmd_v, -6.0, 6.0);
+    sim_left_motor_actual_v += alpha * (sim_left_motor_cmd_v - sim_left_motor_actual_v);
+    sim_right_motor_actual_v += alpha * (sim_right_motor_cmd_v - sim_right_motor_actual_v);
+}
+
+static void update_sensor_noise(double t) {
+    // Deterministic pseudo-noise so runs are reproducible.
+    sim_pitch_noise_deg = 0.08 * sin(2.0 * 3.141592653589793 * 13.0 * t);
+    sim_gyro_noise_dps = 0.25 * sin(2.0 * 3.141592653589793 * 17.0 * t + 0.7);
+}
+
+static void update_plant(double dt, double t) {
+    // Basic single-axis inverted pendulum-like model in degree units.
+    const double gravity_gain = 1.8;
+    const double damping = 3.8;
+    const double motor_gain = 18.0;
+
+    double avg_motor_v = 0.5 * (sim_left_motor_actual_v + sim_right_motor_actual_v);
+    double disturbance = 0.0;
+    if (t > 9.0 && t < 9.3) {
+        disturbance = 22.0; // push disturbance pulse
+    }
+    double theta_ddot = gravity_gain * sim_pitch_deg - damping * sim_gyro_dps + motor_gain * avg_motor_v + disturbance;
+    sim_gyro_dps += theta_ddot * dt;
+    sim_pitch_deg += sim_gyro_dps * dt;
+}
+
+int main(void) {
     struct BalanceBotConfig cfg;
     struct BalanceBotState state;
     BalanceBot_init(&sim_hal, &cfg, &state);
-    double dt = 0.004;
-    double duration = 20.0;
-    int steps = (int)(duration / dt);
+
+    const double dt = 0.004;
+    const double duration = 30.0;
+    const int steps = (int)(duration / dt);
+
     FILE* csv = fopen("sim_stabilize.csv", "w");
-    fprintf(csv, "t,pitch_deg,gyro_dps,left_motor,right_motor\n");
+    if (!csv) {
+        fprintf(stderr, "Failed to open sim_stabilize.csv\n");
+        return 1;
+    }
+
+    fprintf(csv,
+            "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active\n");
+
     for (int i = 0; i <= steps; ++i) {
         double t = i * dt;
-        // Simulate plant
-        double theta_ddot = 1.8 * sim_pitch_deg - 3.8 * sim_gyro_dps + 18.0 * ((sim_left_motor + sim_right_motor) / 2.0);
-        sim_gyro_dps += theta_ddot * dt;
-        sim_pitch_deg += sim_gyro_dps * dt;
-        sim_time_ms += dt * 1000.0;
-        // Run control
+        sim_time_s = t;
+        sim_time_ms = t * 1000.0;
+
+        update_rc_profile(t);
+        update_sensor_noise(t);
+
         BalanceBot_update(&cfg, &state);
-        fprintf(csv, "%f,%f,%f,%f,%f\n", t, sim_pitch_deg, sim_gyro_dps, sim_left_motor, sim_right_motor);
+
+        apply_motor_driver_dynamics(dt);
+        update_plant(dt, t);
+        update_battery_model(dt);
+
+        fprintf(csv,
+                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d\n",
+                t,
+                sim_pitch_deg,
+                sim_gyro_dps,
+                sim_pitch_deg + sim_pitch_noise_deg,
+                sim_gyro_dps + sim_gyro_noise_dps,
+                sim_left_motor_cmd_v,
+                sim_right_motor_cmd_v,
+                sim_left_motor_actual_v,
+                sim_right_motor_actual_v,
+                sim_battery_voltage,
+                sim_rc_throttle,
+                sim_rc_steer,
+                state.rcTargetAngleDeg,
+                state.rcSteeringCmd,
+                state.lvcActive ? 1 : 0);
     }
+
     fclose(csv);
     printf("Simulation complete. Results in sim_stabilize.csv\n");
     return 0;

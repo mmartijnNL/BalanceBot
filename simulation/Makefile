@@ -1,16 +1,17 @@
-CXX = g++
-CXXFLAGS = -std=c++17 -O2
+CC = gcc
+CFLAGS = -std=c11 -O2 -Wall -Wextra -I..
+LDFLAGS = -lm
 
 all: sim
 
-sim: main.o BalanceBotController.o
-	$(CXX) $(CXXFLAGS) -o sim main.o BalanceBotController.o
+sim: main.o BalanceBot.o
+	$(CC) $(CFLAGS) -o sim main.o BalanceBot.o $(LDFLAGS)
 
-main.o: main.cpp BalanceBotController.h
-	$(CXX) $(CXXFLAGS) -c main.cpp
+main.o: main.c ../BalanceBot.h
+	$(CC) $(CFLAGS) -c main.c
 
-BalanceBotController.o: BalanceBotController.cpp BalanceBotController.h
-	$(CXX) $(CXXFLAGS) -c BalanceBotController.cpp
+BalanceBot.o: ../BalanceBot.c ../BalanceBot.h
+	$(CC) $(CFLAGS) -c ../BalanceBot.c -o BalanceBot.o
 
 clean:
 	rm -f *.o sim sim_stabilize.csv
