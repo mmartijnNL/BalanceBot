@@ -1,0 +1,9 @@
+MP1584EN DC-DC Step Down Module (3A, adjustable 3.3–12V)
+
+DC Voltage Sensor Module (0–25V)
+
+MPU6050 GY-521 6DOF IMU (3-axis accelerometer + gyroscope)
+
+2804 BLDC hollow-shaft motor + AS5600 magnetic encoder set (FOC support) ×2
+
+SimpleFOC Shield MKS Dual FOC V3.2 BLDC servo/stepper controller (ESP32-based)
