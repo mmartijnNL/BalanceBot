@@ -1,37 +1,38 @@
+// ...existing code...
 #include "BalanceBot.h"
 #include <stdarg.h>
 #include <stdio.h>
 
-static const struct BalanceBotHAL* g_hal = 0;
+static const struct BalanceBotHardwareAbstractionLayer* g_hardware_abstraction_layer = 0;
 
-void BalanceBot_init(const struct BalanceBotHAL* hal, struct BalanceBotConfig* cfg, struct BalanceBotState* state) {
-    g_hal = hal;
+void BalanceBot_init(const struct BalanceBotHardwareAbstractionLayer* hardware_abstraction_layer, struct BalanceBotConfiguration* configuration, struct BalanceBotState* state) {
+    g_hardware_abstraction_layer = hardware_abstraction_layer;
     // Set defaults if needed
-    if (cfg) {
-        cfg->kp_angle = 12.0f;
-        cfg->ki_angle = 0.0f;
-        cfg->kd_angle = 0.35f;
-        cfg->kp_rate = 0.09f;
-        cfg->ki_rate = 0.18f;
-        cfg->kd_rate = 0.0004f;
-        cfg->driver_voltage_limit = 6.0f;
-        cfg->max_tilt_deg = 25.0f;
-        cfg->control_dt_s = 0.004f;
+    if (configuration) {
+        configuration->proportional_gain_angle = 12.0f;
+        configuration->integral_gain_angle = 0.0f;
+        configuration->derivative_gain_angle = 0.35f;
+        configuration->proportional_gain_rate = 0.09f;
+        configuration->integral_gain_rate = 0.18f;
+        configuration->derivative_gain_rate = 0.0004f;
+        configuration->driver_voltage_limit = 6.0f;
+        configuration->maximum_tilt_degrees = 25.0f;
+        configuration->control_delta_time_seconds = 0.004f;
     }
     if (state) {
-        state->angleInt = 0.0f;
-        state->prevAngleErr = 0.0f;
-        state->rateInt = 0.0f;
-        state->prevRateErr = 0.0f;
-        state->rcTargetAngleDeg = 0.0f;
-        state->rcSteeringCmd = 0.0f;
-        state->rcThrottleFiltered = 0.0f;
-        state->rcSteerFiltered = 0.0f;
-        state->rcSignalValid = false;
-        state->batteryVoltageFiltered = -1.0f;
-        state->lvcActive = false;
-        state->lvcBelowSinceMs = 0;
-        state->balancingEnabled = false;
+        state->angle_integral = 0.0f;
+        state->previous_angle_error = 0.0f;
+        state->rate_integral = 0.0f;
+        state->previous_rate_error = 0.0f;
+        state->rc_target_angle_degrees = 0.0f;
+        state->rc_steering_command = 0.0f;
+        state->rc_throttle_filtered = 0.0f;
+        state->rc_steer_filtered = 0.0f;
+        state->rc_signal_valid = false;
+        state->battery_voltage_filtered = -1.0f;
+        state->low_voltage_cutoff_active = false;
+        state->low_voltage_cutoff_below_since_milliseconds = 0;
+        state->balancing_enabled = false;
     }
 }
 
@@ -39,70 +40,70 @@ static float constrain(float x, float a, float b) {
     return (x < a) ? a : (x > b) ? b : x;
 }
 
-void BalanceBot_update(struct BalanceBotConfig* cfg, struct BalanceBotState* state) {
+void BalanceBot_update(struct BalanceBotConfiguration* configuration, struct BalanceBotState* state) {
     // RC smoothing for analog input channels.
-    float throttleNorm = g_hal->get_rc_throttle();
-    float steerNorm = g_hal->get_rc_steer();
-    throttleNorm = constrain(throttleNorm, -1.0f, 1.0f);
-    steerNorm = constrain(steerNorm, -1.0f, 1.0f);
-    float dt = cfg->control_dt_s;
-    float alphaThrottle = dt / (0.12f + dt);
-    float alphaSteer = dt / (0.08f + dt);
-    state->rcThrottleFiltered += alphaThrottle * (throttleNorm - state->rcThrottleFiltered);
-    state->rcSteerFiltered += alphaSteer * (steerNorm - state->rcSteerFiltered);
-    state->rcTargetAngleDeg = state->rcThrottleFiltered * 6.0f; // RC_MAX_TARGET_ANGLE_DEG
-    state->rcSteeringCmd = state->rcSteerFiltered * 1.8f; // RC_MAX_STEER_CMD
-    state->rcSignalValid = true; // For simulation, always valid
+    float throttle_normalized = g_hardware_abstraction_layer->get_rc_throttle();
+    float steer_normalized = g_hardware_abstraction_layer->get_rc_steer();
+    throttle_normalized = constrain(throttle_normalized, -1.0f, 1.0f);
+    steer_normalized = constrain(steer_normalized, -1.0f, 1.0f);
+    float delta_time = configuration->control_delta_time_seconds;
+    float alpha_throttle = delta_time / (0.12f + delta_time);
+    float alpha_steer = delta_time / (0.08f + delta_time);
+    state->rc_throttle_filtered += alpha_throttle * (throttle_normalized - state->rc_throttle_filtered);
+    state->rc_steer_filtered += alpha_steer * (steer_normalized - state->rc_steer_filtered);
+    state->rc_target_angle_degrees = state->rc_throttle_filtered * 6.0f; // RC_MAX_TARGET_ANGLE_DEG
+    state->rc_steering_command = state->rc_steer_filtered * 1.8f; // RC_MAX_STEER_CMD
+    state->rc_signal_valid = true; // For simulation, always valid
 
     // Battery voltage filtering
-    float vbatt = g_hal->get_battery_voltage();
-    if (state->batteryVoltageFiltered < 0.0f) {
-        state->batteryVoltageFiltered = vbatt;
+    float battery_voltage = g_hardware_abstraction_layer->get_battery_voltage();
+    if (state->battery_voltage_filtered < 0.0f) {
+        state->battery_voltage_filtered = battery_voltage;
     } else {
-        state->batteryVoltageFiltered += 0.08f * (vbatt - state->batteryVoltageFiltered);
+        state->battery_voltage_filtered += 0.08f * (battery_voltage - state->battery_voltage_filtered);
     }
-    // LVC logic (simplified)
-    float lvcCutoff = 4 * 3.30f; // BATTERY_SERIES_CELLS * LVC_CUTOFF_PER_CELL_V
-    float lvcRecover = 4 * 3.45f;
-    unsigned long nowMs = g_hal->millis();
-    if (!state->lvcActive) {
-        if (state->batteryVoltageFiltered <= lvcCutoff) {
-            if (state->lvcBelowSinceMs == 0) state->lvcBelowSinceMs = nowMs;
-            if ((nowMs - state->lvcBelowSinceMs) >= 500) {
-                state->lvcActive = true;
-                state->balancingEnabled = false;
-                g_hal->serial_print("LVC ACTIVE\n");
+    // Low voltage cutoff logic (simplified)
+    float low_voltage_cutoff = 4 * 3.30f; // BATTERY_SERIES_CELLS * LVC_CUTOFF_PER_CELL_V
+    float low_voltage_recover = 4 * 3.45f;
+    unsigned long now_milliseconds = g_hardware_abstraction_layer->milliseconds();
+    if (!state->low_voltage_cutoff_active) {
+        if (state->battery_voltage_filtered <= low_voltage_cutoff) {
+            if (state->low_voltage_cutoff_below_since_milliseconds == 0) state->low_voltage_cutoff_below_since_milliseconds = now_milliseconds;
+            if ((now_milliseconds - state->low_voltage_cutoff_below_since_milliseconds) >= 500) {
+                state->low_voltage_cutoff_active = true;
+                state->balancing_enabled = false;
+                g_hardware_abstraction_layer->serial_print("LOW VOLTAGE CUTOFF ACTIVE\n");
             }
         } else {
-            state->lvcBelowSinceMs = 0;
+            state->low_voltage_cutoff_below_since_milliseconds = 0;
         }
-    } else if (state->batteryVoltageFiltered >= lvcRecover) {
-        state->lvcActive = false;
-        state->lvcBelowSinceMs = 0;
-        g_hal->serial_print("LVC CLEARED\n");
+    } else if (state->battery_voltage_filtered >= low_voltage_recover) {
+        state->low_voltage_cutoff_active = false;
+        state->low_voltage_cutoff_below_since_milliseconds = 0;
+        g_hardware_abstraction_layer->serial_print("LOW VOLTAGE CUTOFF CLEARED\n");
     }
 
     // Main control logic
-    float pitchDeg = g_hal->get_pitch_deg();
-    float gyroPitchRateDegS = g_hal->get_gyro_pitch_rate_dps();
-    float commandedAngleDeg = state->rcTargetAngleDeg;
-    float commandedSteering = state->rcSteeringCmd;
-    float angleErr = commandedAngleDeg - pitchDeg;
-    float dAngle = (angleErr - state->prevAngleErr) / cfg->control_dt_s;
-    state->angleInt += angleErr * cfg->control_dt_s;
-    state->angleInt = constrain(state->angleInt, -15.0f, 15.0f);
-    state->prevAngleErr = angleErr;
-    float targetRateDegS = cfg->kp_angle * angleErr + cfg->ki_angle * state->angleInt + cfg->kd_angle * dAngle;
-    float rateErr = targetRateDegS - gyroPitchRateDegS;
-    float dRate = (rateErr - state->prevRateErr) / cfg->control_dt_s;
-    state->rateInt += rateErr * cfg->control_dt_s;
-    state->rateInt = constrain(state->rateInt, -40.0f, 40.0f);
-    state->prevRateErr = rateErr;
-    float baseCmd = cfg->kp_rate * rateErr + cfg->ki_rate * state->rateInt + cfg->kd_rate * dRate;
-    baseCmd = constrain(baseCmd, -cfg->driver_voltage_limit, cfg->driver_voltage_limit);
-    float leftCmd = baseCmd - commandedSteering;
-    float rightCmd = baseCmd + commandedSteering;
+    float pitch_degrees = g_hardware_abstraction_layer->get_pitch_degrees();
+    float gyroscope_pitch_rate_degrees_per_second = g_hardware_abstraction_layer->get_gyroscope_pitch_rate_degrees_per_second();
+    float commanded_angle_degrees = state->rc_target_angle_degrees;
+    float commanded_steering = state->rc_steering_command;
+    float angle_error = commanded_angle_degrees - pitch_degrees;
+    float delta_angle = (angle_error - state->previous_angle_error) / configuration->control_delta_time_seconds;
+    state->angle_integral += angle_error * configuration->control_delta_time_seconds;
+    state->angle_integral = constrain(state->angle_integral, -15.0f, 15.0f);
+    state->previous_angle_error = angle_error;
+    float target_rate_degrees_per_second = configuration->proportional_gain_angle * angle_error + configuration->integral_gain_angle * state->angle_integral + configuration->derivative_gain_angle * delta_angle;
+    float rate_error = target_rate_degrees_per_second - gyroscope_pitch_rate_degrees_per_second;
+    float delta_rate = (rate_error - state->previous_rate_error) / configuration->control_delta_time_seconds;
+    state->rate_integral += rate_error * configuration->control_delta_time_seconds;
+    state->rate_integral = constrain(state->rate_integral, -40.0f, 40.0f);
+    state->previous_rate_error = rate_error;
+    float base_command = configuration->proportional_gain_rate * rate_error + configuration->integral_gain_rate * state->rate_integral + configuration->derivative_gain_rate * delta_rate;
+    base_command = constrain(base_command, -configuration->driver_voltage_limit, configuration->driver_voltage_limit);
+    float left_command = base_command - commanded_steering;
+    float right_command = base_command + commanded_steering;
     // Output to motors
-    g_hal->motor_left_move(leftCmd);
-    g_hal->motor_right_move(rightCmd);
+    g_hardware_abstraction_layer->motor_left_move(left_command);
+    g_hardware_abstraction_layer->motor_right_move(right_command);
 }

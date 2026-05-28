@@ -9,56 +9,56 @@
 #define fabsf std::fabs
 #endif
 
-struct BalanceBotConfig {
-    float kp_angle = 22.0f;
-    float ki_angle = 0.0f;
-    float kd_angle = 0.7f;
-    float kp_rate = 0.12f;
-    float ki_rate = 0.8f;
-    float kd_rate = 0.0008f;
+struct BalanceBotConfiguration {
+    float proportional_gain_angle = 22.0f;
+    float integral_gain_angle = 0.0f;
+    float derivative_gain_angle = 0.7f;
+    float proportional_gain_rate = 0.12f;
+    float integral_gain_rate = 0.8f;
+    float derivative_gain_rate = 0.0008f;
     float driver_voltage_limit = 6.0f;
-    float max_tilt_deg = 25.0f;
+    float maximum_tilt_degrees = 25.0f;
 };
 
 struct BalanceBotState {
-    float angleInt = 0.0f;
-    float prevAngleErr = 0.0f;
-    float rateInt = 0.0f;
-    float prevRateErr = 0.0f;
+    float angle_integral = 0.0f;
+    float previous_angle_error = 0.0f;
+    float rate_integral = 0.0f;
+    float previous_rate_error = 0.0f;
 };
 
 inline void resetBalanceBotState(BalanceBotState &state) {
-    state.angleInt = 0.0f;
-    state.prevAngleErr = 0.0f;
-    state.rateInt = 0.0f;
-    state.prevRateErr = 0.0f;
+    state.angle_integral = 0.0f;
+    state.previous_angle_error = 0.0f;
+    state.rate_integral = 0.0f;
+    state.previous_rate_error = 0.0f;
 }
 
 inline float balanceBotControl(
-    BalanceBotConfig &cfg,
+    BalanceBotConfiguration &configuration,
     BalanceBotState &state,
-    float pitchDeg,
-    float gyroPitchRateDegS,
-    float dt,
-    float commandedAngleDeg,
-    float commandedSteering,
-    float &leftCmd,
-    float &rightCmd
+    float pitch_degrees,
+    float gyroscope_pitch_rate_degrees_per_second,
+    float delta_time,
+    float commanded_angle_degrees,
+    float commanded_steering,
+    float &left_command,
+    float &right_command
 ) {
-    float angleErr = commandedAngleDeg - pitchDeg;
-    float dAngle = (angleErr - state.prevAngleErr) / dt;
-    state.angleInt += angleErr * dt;
-    state.angleInt = constrain(state.angleInt, -15.0f, 15.0f);
-    state.prevAngleErr = angleErr;
-    float targetRateDegS = cfg.kp_angle * angleErr + cfg.ki_angle * state.angleInt + cfg.kd_angle * dAngle;
-    float rateErr = targetRateDegS - gyroPitchRateDegS;
-    float dRate = (rateErr - state.prevRateErr) / dt;
-    state.rateInt += rateErr * dt;
-    state.rateInt = constrain(state.rateInt, -40.0f, 40.0f);
-    state.prevRateErr = rateErr;
-    float baseCmd = cfg.kp_rate * rateErr + cfg.ki_rate * state.rateInt + cfg.kd_rate * dRate;
-    baseCmd = constrain(baseCmd, -cfg.driver_voltage_limit, cfg.driver_voltage_limit);
-    leftCmd = baseCmd - commandedSteering;
-    rightCmd = baseCmd + commandedSteering;
-    return baseCmd;
+    float angle_error = commanded_angle_degrees - pitch_degrees;
+    float delta_angle = (angle_error - state.previous_angle_error) / delta_time;
+    state.angle_integral += angle_error * delta_time;
+    state.angle_integral = constrain(state.angle_integral, -15.0f, 15.0f);
+    state.previous_angle_error = angle_error;
+    float target_rate_degrees_per_second = configuration.proportional_gain_angle * angle_error + configuration.integral_gain_angle * state.angle_integral + configuration.derivative_gain_angle * delta_angle;
+    float rate_error = target_rate_degrees_per_second - gyroscope_pitch_rate_degrees_per_second;
+    float delta_rate = (rate_error - state.previous_rate_error) / delta_time;
+    state.rate_integral += rate_error * delta_time;
+    state.rate_integral = constrain(state.rate_integral, -40.0f, 40.0f);
+    state.previous_rate_error = rate_error;
+    float base_command = configuration.proportional_gain_rate * rate_error + configuration.integral_gain_rate * state.rate_integral + configuration.derivative_gain_rate * delta_rate;
+    base_command = constrain(base_command, -configuration.driver_voltage_limit, configuration.driver_voltage_limit);
+    left_command = base_command - commanded_steering;
+    right_command = base_command + commanded_steering;
+    return base_command;
 }
