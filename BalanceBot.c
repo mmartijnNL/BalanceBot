@@ -8,12 +8,12 @@ void BalanceBot_init(const struct BalanceBotHAL* hal, struct BalanceBotConfig* c
     g_hal = hal;
     // Set defaults if needed
     if (cfg) {
-        cfg->kp_angle = 22.0f;
+        cfg->kp_angle = 12.0f;
         cfg->ki_angle = 0.0f;
-        cfg->kd_angle = 0.7f;
-        cfg->kp_rate = 0.12f;
-        cfg->ki_rate = 0.8f;
-        cfg->kd_rate = 0.0008f;
+        cfg->kd_angle = 0.35f;
+        cfg->kp_rate = 0.09f;
+        cfg->ki_rate = 0.18f;
+        cfg->kd_rate = 0.0004f;
         cfg->driver_voltage_limit = 6.0f;
         cfg->max_tilt_deg = 25.0f;
         cfg->control_dt_s = 0.004f;
@@ -25,6 +25,8 @@ void BalanceBot_init(const struct BalanceBotHAL* hal, struct BalanceBotConfig* c
         state->prevRateErr = 0.0f;
         state->rcTargetAngleDeg = 0.0f;
         state->rcSteeringCmd = 0.0f;
+        state->rcThrottleFiltered = 0.0f;
+        state->rcSteerFiltered = 0.0f;
         state->rcSignalValid = false;
         state->batteryVoltageFiltered = -1.0f;
         state->lvcActive = false;
@@ -38,11 +40,18 @@ static float constrain(float x, float a, float b) {
 }
 
 void BalanceBot_update(struct BalanceBotConfig* cfg, struct BalanceBotState* state) {
-    // Simulate RC update
+    // RC smoothing for analog input channels.
     float throttleNorm = g_hal->get_rc_throttle();
     float steerNorm = g_hal->get_rc_steer();
-    state->rcTargetAngleDeg = throttleNorm * 6.0f; // RC_MAX_TARGET_ANGLE_DEG
-    state->rcSteeringCmd = steerNorm * 1.8f; // RC_MAX_STEER_CMD
+    throttleNorm = constrain(throttleNorm, -1.0f, 1.0f);
+    steerNorm = constrain(steerNorm, -1.0f, 1.0f);
+    float dt = cfg->control_dt_s;
+    float alphaThrottle = dt / (0.12f + dt);
+    float alphaSteer = dt / (0.08f + dt);
+    state->rcThrottleFiltered += alphaThrottle * (throttleNorm - state->rcThrottleFiltered);
+    state->rcSteerFiltered += alphaSteer * (steerNorm - state->rcSteerFiltered);
+    state->rcTargetAngleDeg = state->rcThrottleFiltered * 6.0f; // RC_MAX_TARGET_ANGLE_DEG
+    state->rcSteeringCmd = state->rcSteerFiltered * 1.8f; // RC_MAX_STEER_CMD
     state->rcSignalValid = true; // For simulation, always valid
 
     // Battery voltage filtering

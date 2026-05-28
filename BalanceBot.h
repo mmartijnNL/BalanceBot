@@ -48,6 +48,7 @@ struct BalanceBotState {
     float rateInt, prevRateErr;
     // RC
     float rcTargetAngleDeg, rcSteeringCmd;
+    float rcThrottleFiltered, rcSteerFiltered;
     bool rcSignalValid;
     // Battery
     float batteryVoltageFiltered;

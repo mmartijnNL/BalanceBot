@@ -63,24 +63,37 @@ static double clampd(double x, double lo, double hi) {
     return x;
 }
 
-// Time-varying RC profile to test stabilization, tracking, and steering coupling.
-static void update_rc_profile(double t) {
-    if (t < 3.0) {
-        sim_rc_throttle = 0.0;
-        sim_rc_steer = 0.0;
-    } else if (t < 8.0) {
-        sim_rc_throttle = 0.20;
-        sim_rc_steer = 0.0;
-    } else if (t < 12.0) {
-        sim_rc_throttle = -0.12;
-        sim_rc_steer = 0.25;
-    } else if (t < 18.0) {
-        sim_rc_throttle = 0.05;
-        sim_rc_steer = -0.30;
-    } else {
-        sim_rc_throttle = 0.0;
-        sim_rc_steer = 0.0;
+static double smoothstep01(double x) {
+    x = clampd(x, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+static double sample_smooth_profile(double t, const double* times, const double* values, int count) {
+    if (t <= times[0]) return values[0];
+    if (t >= times[count - 1]) return values[count - 1];
+
+    for (int i = 0; i < count - 1; ++i) {
+        if (t < times[i + 1]) {
+            double seg_dt = times[i + 1] - times[i];
+            if (seg_dt <= 0.0) return values[i + 1];
+            double u = (t - times[i]) / seg_dt;
+            double s = smoothstep01(u);
+            return values[i] + (values[i + 1] - values[i]) * s;
+        }
     }
+
+    return values[count - 1];
+}
+
+// Time-varying analog RC profile (continuous and smooth, no jumps).
+static void update_rc_profile(double t) {
+    static const double times[] = {0.0, 3.0, 8.0, 12.0, 18.0, 30.0};
+    static const double throttle_vals[] = {0.0, 0.0, 0.20, -0.12, 0.05, 0.0};
+    static const double steer_vals[] = {0.0, 0.0, 0.0, 0.25, -0.30, 0.0};
+    const int n = (int)(sizeof(times) / sizeof(times[0]));
+
+    sim_rc_throttle = sample_smooth_profile(t, times, throttle_vals, n);
+    sim_rc_steer = sample_smooth_profile(t, times, steer_vals, n);
 }
 
 static void update_battery_model(double dt) {
