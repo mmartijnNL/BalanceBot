@@ -1,3 +1,6 @@
+#ifndef BALANCE_BOT_PICO_INO
+#define BALANCE_BOT_PICO_INO
+
 #include "BalanceBot.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -230,3 +233,5 @@ void loop() {
     lastControlMicroseconds = nowMicroseconds;
     BalanceBot_update(&botConfiguration, &botState);
 }
+
+#endif // BALANCE_BOT_PICO_INO
