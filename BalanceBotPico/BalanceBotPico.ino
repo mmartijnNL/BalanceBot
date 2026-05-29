@@ -8,7 +8,7 @@
 #include <MPU6050_light.h>
 #include <stdarg.h>
 #include <stdio.h>
-#if defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>)
+#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>)
 #include <pico/bootrom.h>
 #endif
 
@@ -60,7 +60,7 @@ bool previousPauseButtonPressed = false;
 uint32_t lastPauseToggleMilliseconds = 0;
 
 bool readPauseButtonPressed() {
-#if defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>)
+#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>)
     return get_bootsel_button();
 #else
     return false;
@@ -190,7 +190,7 @@ void setup() {
 #if !defined(PIN_WIRE1_SDA) || !defined(PIN_WIRE1_SCL)
     Serial.println("Warning: Wire1 is unavailable on this core/board; two AS5600 sensors cannot share one I2C bus.");
 #endif
-#if !(defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>))
+#if !(defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>))
     Serial.println("Warning: BOOTSEL button API unavailable; pause/resume button control is disabled.");
 #endif
 

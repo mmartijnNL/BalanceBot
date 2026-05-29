@@ -18,6 +18,48 @@ BLDCMotor motorRight = BLDCMotor(7);
 BLDCDriver3PWM driverLeft = BLDCDriver3PWM(25, 26, 27, 4);
 BLDCDriver3PWM driverRight = BLDCDriver3PWM(14, 32, 33, 16);
 
+#if defined(BTN_BUILTIN)
+constexpr int kPauseButtonPin = BTN_BUILTIN;
+#else
+constexpr int kPauseButtonPin = 0; // Typical ESP32 BOOT button pin (active low)
+#endif
+#if defined(LOW)
+constexpr int kPauseButtonPressedLevel = LOW;
+#else
+constexpr int kPauseButtonPressedLevel = 0;
+#endif
+#if defined(INPUT_PULLUP)
+constexpr uint8_t kPauseButtonPinMode = INPUT_PULLUP;
+#else
+constexpr uint8_t kPauseButtonPinMode = INPUT;
+#endif
+constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
+bool pauseRequested = false;
+bool previousPauseButtonPressed = false;
+uint32_t lastPauseToggleMilliseconds = 0;
+unsigned long lastControlUs = 0;
+
+bool readPauseButtonPressed() {
+    return digitalRead(kPauseButtonPin) == kPauseButtonPressedLevel;
+}
+
+void handlePauseToggleButton() {
+    const bool buttonPressed = readPauseButtonPressed();
+    const uint32_t nowMilliseconds = millis();
+    if (buttonPressed && !previousPauseButtonPressed &&
+        (nowMilliseconds - lastPauseToggleMilliseconds) >= kPauseToggleDebounceMilliseconds) {
+        pauseRequested = !pauseRequested;
+        lastPauseToggleMilliseconds = nowMilliseconds;
+        if (pauseRequested) {
+            Serial.println("Paused: motors commanded to zero.");
+        } else {
+            lastControlUs = micros();
+            Serial.println("Resumed: balancing update loop running.");
+        }
+    }
+    previousPauseButtonPressed = buttonPressed;
+}
+
 // --- HAL implementation for ESP32/Arduino ---
 uint32_t hal_millis(void) { return millis(); }
 uint32_t hal_micros(void) { return micros(); }
@@ -48,7 +90,6 @@ struct BalanceBotHardwareAbstractionLayer bot_hal = {
 };
 struct BalanceBotConfiguration botCfg;
 struct BalanceBotState botState;
-unsigned long lastControlUs = 0;
 
 void setup() {
     Serial.begin(115200);
@@ -57,15 +98,26 @@ void setup() {
     pinMode(35, INPUT); // RC_THROTTLE_PIN
     pinMode(39, INPUT); // RC_STEER_PIN
     pinMode(34, INPUT); // BATTERY_ADC_PIN
+    pinMode(kPauseButtonPin, kPauseButtonPinMode);
     // TODO: attachInterrupts, setupSensorsAndMotors, etc.
     lastControlUs = micros();
     BalanceBot_init(&bot_hal, &botCfg, &botState);
+    Serial.println("Press BOOT button to toggle pause/resume.");
     Serial.println("Type 'e' to enable balancing, 'D' to disable.");
 }
 
 void loop() {
+    handlePauseToggleButton();
+
     motorLeft.loopFOC();
     motorRight.loopFOC();
+
+    if (pauseRequested) {
+        motorLeft.move(0.0f);
+        motorRight.move(0.0f);
+        return;
+    }
+
     unsigned long nowUs = micros();
     float dt = (nowUs - lastControlUs) * 1e-6f;
     if (dt < 0.004f) return;
