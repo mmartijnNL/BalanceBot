@@ -6,10 +6,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-// Main entry points for Arduino .ino
-void setup(void);
-void loop(void);
-
 // Hardware abstraction layer (HardwareAbstractionLayer) interface
 struct BalanceBotHardwareAbstractionLayer {
     // Time

@@ -1,4 +1,5 @@
 #include "../BalanceBot.h"
+#include "../BalanceBot.c"
 #include <Arduino.h>
 #include <Wire.h>
 #include <SimpleFOC.h>
