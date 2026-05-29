@@ -1,5 +1,4 @@
 #include "BalanceBot.h"
-#include "BalanceBot.c"
 #include <Arduino.h>
 #include <Wire.h>
 #include <SimpleFOC.h>
@@ -33,7 +32,11 @@ constexpr float kAdcReferenceVoltage = 3.3f;
 constexpr float kControlPeriodSeconds = 0.004f;
 
 TwoWire& leftBus = Wire;
+#if defined(PIN_WIRE1_SDA) && defined(PIN_WIRE1_SCL)
 TwoWire& rightBus = Wire1;
+#else
+TwoWire& rightBus = Wire;
+#endif
 MPU6050 mpu(leftBus);
 MagneticSensorI2C sensorLeft = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C sensorRight = MagneticSensorI2C(AS5600_I2C);
@@ -47,19 +50,26 @@ BalanceBotState botState;
 uint32_t lastControlMicroseconds = 0;
 
 void initializeI2cBuses() {
+#if !defined(ARDUINO_ARCH_MBED)
     leftBus.setSDA(kLeftBusSdaPin);
     leftBus.setSCL(kLeftBusSclPin);
+#endif
     leftBus.begin();
 
+#if defined(PIN_WIRE1_SDA) && defined(PIN_WIRE1_SCL)
+#if !defined(ARDUINO_ARCH_MBED)
     rightBus.setSDA(kRightBusSdaPin);
     rightBus.setSCL(kRightBusSclPin);
+#endif
     rightBus.begin();
+#endif
 }
 
 void initializeImu() {
     byte imuStatus = mpu.begin();
     if (imuStatus != 0) {
-        Serial.printf("MPU6050 init failed: %d\n", imuStatus);
+        Serial.print("MPU6050 init failed: ");
+        Serial.println(static_cast<int>(imuStatus));
         return;
     }
     mpu.calcOffsets(true, true);
@@ -142,6 +152,9 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\nBalanceBot Pico boot");
+#if !defined(PIN_WIRE1_SDA) || !defined(PIN_WIRE1_SCL)
+    Serial.println("Warning: Wire1 is unavailable on this core/board; two AS5600 sensors cannot share one I2C bus.");
+#endif
 
     analogReadResolution(12);
     pinMode(kBatteryAdcPin, INPUT);
