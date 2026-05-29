@@ -1,11 +1,16 @@
-# BalanceBot (ESP32 + Dual BLDC + MPU6050 + AS5600)
+# BalanceBot (Arduino + Raspberry Pi Pico + Simulation)
 
 This project contains starter firmware for a 2-wheel self-balancing robot using:
 - ESP32 (on MKS Dual FOC V3.2)
+- Raspberry Pi Pico / RP2040 as an alternate controller target
 - 2x 2804 BLDC motor + AS5600 magnetic encoder
 - MPU6050 IMU
 - SimpleFOC library
 - Standard RC receiver (2 PWM channels: throttle and steering)
+
+The shared control logic stays in [BalanceBot.h](/home/Desktop/Applications/BalanceBot/BalanceBot.h) and [BalanceBot.c](/home/Desktop/Applications/BalanceBot/BalanceBot.c). Hardware-specific bindings live alongside it:
+- [BalanceBotArduino/BalanceBotArduino.ino](/home/Desktop/Applications/BalanceBot/BalanceBotArduino/BalanceBotArduino.ino) for the ESP32-based Arduino target
+- [BalanceBotPico/BalanceBotPico.ino](/home/Desktop/Applications/BalanceBot/BalanceBotPico/BalanceBotPico.ino) for the Raspberry Pi Pico target
 
 ## Important hardware note
 Each AS5600 uses fixed I2C address `0x36`.
@@ -60,13 +65,23 @@ flowchart LR
 - Steering channel: `GPIO39`
 
 ## Software setup (Arduino IDE)
+### ESP32 target
 1. Install ESP32 board package by Espressif.
 2. Install libraries:
    - `SimpleFOC`
    - `MPU6050_light`
-3. Open `BalanceBot.ino`.
+3. Open `BalanceBotArduino/BalanceBotArduino.ino`.
 4. Select your ESP32 board and port.
 5. Upload.
+
+### Raspberry Pi Pico target
+1. Install an RP2040 Arduino core such as `Arduino Mbed OS RP2040 Boards` or `Raspberry Pi Pico/RP2040`.
+2. Install libraries:
+   - `SimpleFOC`
+   - `MPU6050_light`
+3. Open `BalanceBotPico/BalanceBotPico.ino`.
+4. Select your Pico board and port.
+5. Review the pin constants at the top of the sketch and match them to your driver, encoders, IMU, battery divider, and RC receiver wiring before uploading.
 
 ## First startup procedure
 1. Put robot on a stand so wheels are free.
@@ -111,7 +126,7 @@ python3 simulation/balancebot_sim.py --scenario stabilize --csv sim_stabilize.cs
 ```
 
 What it validates:
-- Uses the same PID structure and limits as `BalanceBot.ino`
+- Uses the same PID structure and limits as the shared controller in `BalanceBot.c`
 - Checks whether the controller settles pitch after startup/disturbance
 - Verifies safety cut behavior when tilt exceeds `MAX_TILT_DEG`
 
