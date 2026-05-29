@@ -134,6 +134,23 @@ Note:
 - The physics model is simplified and intended for control sanity checks.
 - A simulation pass does not replace real hardware tuning.
 
+## Native INO test harness
+You can run host-side tests for `BalanceBotPico.ino` without flashing hardware.
+
+From project root:
+
+```bash
+make -C tests run
+```
+
+This harness uses fake Arduino/SimpleFOC/MPU/Wire layers and lets tests:
+- inject pin/sensor inputs
+- advance virtual time
+- verify motor command outputs
+- assert on serial log output
+
+Add new tests in `tests/test_pico_ino.cpp`.
+
 ## Notes
 - Keep all grounds common (battery, driver, ESP32, sensors).
 - Verify voltage-sensor output never exceeds ESP32 ADC input max (3.3V).

@@ -5,6 +5,9 @@
 #include <MPU6050_light.h>
 #include <stdarg.h>
 #include <stdio.h>
+#if defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>)
+#include <pico/bootrom.h>
+#endif
 
 namespace {
 
@@ -30,6 +33,7 @@ constexpr uint8_t kRightMotorEnablePin = 17;
 constexpr float kBatteryDividerRatio = 5.0f;
 constexpr float kAdcReferenceVoltage = 3.3f;
 constexpr float kControlPeriodSeconds = 0.004f;
+constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
 
 TwoWire& leftBus = Wire;
 #if defined(PIN_WIRE1_SDA) && defined(PIN_WIRE1_SCL)
@@ -48,6 +52,34 @@ BLDCDriver3PWM driverRight = BLDCDriver3PWM(kRightMotorUPin, kRightMotorVPin, kR
 BalanceBotConfiguration botConfiguration;
 BalanceBotState botState;
 uint32_t lastControlMicroseconds = 0;
+bool pauseRequested = false;
+bool previousPauseButtonPressed = false;
+uint32_t lastPauseToggleMilliseconds = 0;
+
+bool readPauseButtonPressed() {
+#if defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>)
+    return get_bootsel_button();
+#else
+    return false;
+#endif
+}
+
+void handlePauseToggleButton() {
+    const bool buttonPressed = readPauseButtonPressed();
+    const uint32_t nowMilliseconds = millis();
+    if (buttonPressed && !previousPauseButtonPressed &&
+        (nowMilliseconds - lastPauseToggleMilliseconds) >= kPauseToggleDebounceMilliseconds) {
+        pauseRequested = !pauseRequested;
+        lastPauseToggleMilliseconds = nowMilliseconds;
+        if (pauseRequested) {
+            Serial.println("Paused: motors commanded to zero.");
+        } else {
+            lastControlMicroseconds = micros();
+            Serial.println("Resumed: balancing update loop running.");
+        }
+    }
+    previousPauseButtonPressed = buttonPressed;
+}
 
 void initializeI2cBuses() {
 #if !defined(ARDUINO_ARCH_MBED)
@@ -155,6 +187,9 @@ void setup() {
 #if !defined(PIN_WIRE1_SDA) || !defined(PIN_WIRE1_SCL)
     Serial.println("Warning: Wire1 is unavailable on this core/board; two AS5600 sensors cannot share one I2C bus.");
 #endif
+#if !(defined(ARDUINO_ARCH_RP2040) && __has_include(<pico/bootrom.h>))
+    Serial.println("Warning: BOOTSEL button API unavailable; pause/resume button control is disabled.");
+#endif
 
     analogReadResolution(12);
     pinMode(kBatteryAdcPin, INPUT);
@@ -173,6 +208,16 @@ void setup() {
 }
 
 void loop() {
+    handlePauseToggleButton();
+
+    if (pauseRequested) {
+        motorLeft.move(0.0f);
+        motorRight.move(0.0f);
+        motorLeft.loopFOC();
+        motorRight.loopFOC();
+        return;
+    }
+
     motorLeft.loopFOC();
     motorRight.loopFOC();
 
