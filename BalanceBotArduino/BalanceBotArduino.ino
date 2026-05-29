@@ -1,4 +1,4 @@
-#include "BalanceBot.h"
+#include "../BalanceBot.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <SimpleFOC.h>
@@ -49,7 +49,7 @@ struct BalanceBotConfig botCfg;
 struct BalanceBotState botState;
 unsigned long lastControlUs = 0;
 
-void BalanceBot_main_setup() {
+void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\nBalanceBot boot");
@@ -62,7 +62,7 @@ void BalanceBot_main_setup() {
     Serial.println("Type 'e' to enable balancing, 'D' to disable.");
 }
 
-void BalanceBot_main_loop() {
+void loop() {
     motorLeft.loopFOC();
     motorRight.loopFOC();
     unsigned long nowUs = micros();

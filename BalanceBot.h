@@ -7,8 +7,8 @@ extern "C" {
 #include <stdbool.h>
 
 // Main entry points for Arduino .ino
-void BalanceBot_main_setup(void);
-void BalanceBot_main_loop(void);
+void setup(void);
+void loop(void);
 
 // Hardware abstraction layer (HardwareAbstractionLayer) interface
 struct BalanceBotHardwareAbstractionLayer {
