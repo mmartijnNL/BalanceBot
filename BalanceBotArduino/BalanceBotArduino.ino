@@ -31,7 +31,7 @@ float hal_get_pitch_deg(void) { mpu.update(); return mpu.getAngleX(); }
 float hal_get_gyro_pitch_rate_dps(void) { mpu.update(); return mpu.getGyroX(); }
 float hal_get_battery_voltage(void) { uint16_t raw = analogRead(34); float adcV = (raw / 4095.0f) * 3.3f; return adcV * 5.0f; }
 
-struct BalanceBotHAL bot_hal = {
+struct BalanceBotHardwareAbstractionLayer bot_hal = {
     hal_millis,
     hal_micros,
     hal_serial_print,
@@ -45,7 +45,7 @@ struct BalanceBotHAL bot_hal = {
     hal_get_gyro_pitch_rate_dps,
     hal_get_battery_voltage
 };
-struct BalanceBotConfig botCfg;
+struct BalanceBotConfiguration botCfg;
 struct BalanceBotState botState;
 unsigned long lastControlUs = 0;
 
