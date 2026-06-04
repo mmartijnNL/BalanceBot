@@ -2,9 +2,9 @@
 
 This folder provides a native host test harness for Arduino sketch logic.
 
-It compiles `BalanceBotPico.ino` as regular C++ against fake Arduino/SimpleFOC/MPU6050/Wire shims, then runs assertions against:
+It compiles `BalanceBotPico.ino` as regular C++ against fake Arduino/MPU6050/Wire shims, then runs assertions against:
 - simulated pin setup and reads
-- motor command outputs
+- UART command outputs to MKS
 - serial log text
 
 ## Run tests

@@ -59,6 +59,7 @@ class FakeSerial {
 };
 
 extern FakeSerial Serial;
+extern FakeSerial Serial1;
 
 void pinMode(int pin, int mode);
 void digitalWrite(int pin, int value);

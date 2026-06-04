@@ -4,7 +4,6 @@
 #include "BalanceBot.h"
 #include <Arduino.h>
 #include <Wire.h>
-#include <SimpleFOC.h>
 #include <MPU6050_light.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -14,43 +13,24 @@
 
 namespace {
 
-constexpr uint8_t kLeftBusSdaPin = 4;
-constexpr uint8_t kLeftBusSclPin = 5;
-constexpr uint8_t kRightBusSdaPin = 6;
-constexpr uint8_t kRightBusSclPin = 7;
+constexpr uint8_t kImuSdaPin = 4;
+constexpr uint8_t kImuSclPin = 5;
 
 constexpr uint8_t kBatteryAdcPin = 26;
 constexpr uint8_t kRcThrottlePin = 20;
 constexpr uint8_t kRcSteerPin = 21;
 
-constexpr uint8_t kLeftMotorUPin = 10;
-constexpr uint8_t kLeftMotorVPin = 11;
-constexpr uint8_t kLeftMotorWPin = 12;
-constexpr uint8_t kLeftMotorEnablePin = 13;
-
-constexpr uint8_t kRightMotorUPin = 14;
-constexpr uint8_t kRightMotorVPin = 15;
-constexpr uint8_t kRightMotorWPin = 16;
-constexpr uint8_t kRightMotorEnablePin = 17;
+constexpr uint8_t kMksUartTxPin = 8;
+constexpr uint8_t kMksUartRxPin = 9;
+constexpr uint32_t kMksUartBaud = 115200;
 
 constexpr float kBatteryDividerRatio = 5.0f;
 constexpr float kAdcReferenceVoltage = 3.3f;
 constexpr float kControlPeriodSeconds = 0.004f;
 constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
 
-TwoWire& leftBus = Wire;
-#if defined(PIN_WIRE1_SDA) && defined(PIN_WIRE1_SCL)
-TwoWire& rightBus = Wire1;
-#else
-TwoWire& rightBus = Wire;
-#endif
-MPU6050 mpu(leftBus);
-MagneticSensorI2C sensorLeft = MagneticSensorI2C(AS5600_I2C);
-MagneticSensorI2C sensorRight = MagneticSensorI2C(AS5600_I2C);
-BLDCMotor motorLeft = BLDCMotor(7);
-BLDCMotor motorRight = BLDCMotor(7);
-BLDCDriver3PWM driverLeft = BLDCDriver3PWM(kLeftMotorUPin, kLeftMotorVPin, kLeftMotorWPin, kLeftMotorEnablePin);
-BLDCDriver3PWM driverRight = BLDCDriver3PWM(kRightMotorUPin, kRightMotorVPin, kRightMotorWPin, kRightMotorEnablePin);
+TwoWire& imuBus = Wire;
+MPU6050 mpu(imuBus);
 
 BalanceBotConfiguration botConfiguration;
 BalanceBotState botState;
@@ -58,6 +38,15 @@ uint32_t lastControlMicroseconds = 0;
 bool pauseRequested = false;
 bool previousPauseButtonPressed = false;
 uint32_t lastPauseToggleMilliseconds = 0;
+float pendingLeftCommand = 0.0f;
+float pendingRightCommand = 0.0f;
+
+void sendMksCommand(float leftCommand, float rightCommand) {
+    Serial1.print("M ");
+    Serial1.print(leftCommand);
+    Serial1.print(" ");
+    Serial1.println(rightCommand);
+}
 
 bool readPauseButtonPressed() {
 #if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>)
@@ -75,6 +64,7 @@ void handlePauseToggleButton() {
         pauseRequested = !pauseRequested;
         lastPauseToggleMilliseconds = nowMilliseconds;
         if (pauseRequested) {
+            sendMksCommand(0.0f, 0.0f);
             Serial.println("Paused: motors commanded to zero.");
         } else {
             lastControlMicroseconds = micros();
@@ -86,18 +76,10 @@ void handlePauseToggleButton() {
 
 void initializeI2cBuses() {
 #if !defined(ARDUINO_ARCH_MBED)
-    leftBus.setSDA(kLeftBusSdaPin);
-    leftBus.setSCL(kLeftBusSclPin);
+    imuBus.setSDA(kImuSdaPin);
+    imuBus.setSCL(kImuSclPin);
 #endif
-    leftBus.begin();
-
-#if defined(PIN_WIRE1_SDA) && defined(PIN_WIRE1_SCL)
-#if !defined(ARDUINO_ARCH_MBED)
-    rightBus.setSDA(kRightBusSdaPin);
-    rightBus.setSCL(kRightBusSclPin);
-#endif
-    rightBus.begin();
-#endif
+    imuBus.begin();
 }
 
 void initializeImu() {
@@ -110,30 +92,13 @@ void initializeImu() {
     mpu.calcOffsets(true, true);
 }
 
-void initializeMotors() {
-    sensorLeft.init(&leftBus);
-    sensorRight.init(&rightBus);
-
-    motorLeft.linkSensor(&sensorLeft);
-    motorRight.linkSensor(&sensorRight);
-
-    driverLeft.voltage_power_supply = 12.0f;
-    driverRight.voltage_power_supply = 12.0f;
-    driverLeft.voltage_limit = botConfiguration.driver_voltage_limit;
-    driverRight.voltage_limit = botConfiguration.driver_voltage_limit;
-    driverLeft.init();
-    driverRight.init();
-
-    motorLeft.linkDriver(&driverLeft);
-    motorRight.linkDriver(&driverRight);
-    motorLeft.voltage_limit = botConfiguration.driver_voltage_limit;
-    motorRight.voltage_limit = botConfiguration.driver_voltage_limit;
-    motorLeft.controller = MotionControlType::torque;
-    motorRight.controller = MotionControlType::torque;
-    motorLeft.init();
-    motorRight.init();
-    motorLeft.initFOC();
-    motorRight.initFOC();
+void initializeMksUart() {
+#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED)
+    Serial1.setTX(kMksUartTxPin);
+    Serial1.setRX(kMksUartRxPin);
+#endif
+    Serial1.begin(kMksUartBaud);
+    sendMksCommand(0.0f, 0.0f);
 }
 
 }  // namespace
@@ -150,8 +115,11 @@ void hal_serial_printf(const char* fmt, ...) {
     Serial.print(buffer);
 }
 uint16_t hal_analog_read(int pin) { return analogRead(pin); }
-void hal_motor_left_move(float voltage) { motorLeft.move(voltage); }
-void hal_motor_right_move(float voltage) { motorRight.move(-voltage); }
+void hal_motor_left_move(float voltage) { pendingLeftCommand = voltage; }
+void hal_motor_right_move(float voltage) {
+    pendingRightCommand = -voltage;
+    sendMksCommand(pendingLeftCommand, pendingRightCommand);
+}
 float hal_get_rc_throttle(void) { return 0.0f; }
 float hal_get_rc_steer(void) { return 0.0f; }
 float hal_get_pitch_deg(void) {
@@ -187,9 +155,6 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\nBalanceBot Pico boot");
-#if !defined(PIN_WIRE1_SDA) || !defined(PIN_WIRE1_SCL)
-    Serial.println("Warning: Wire1 is unavailable on this core/board; two AS5600 sensors cannot share one I2C bus.");
-#endif
 #if !(defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>))
     Serial.println("Warning: BOOTSEL button API unavailable; pause/resume button control is disabled.");
 #endif
@@ -204,25 +169,19 @@ void setup() {
 
     initializeI2cBuses();
     initializeImu();
-    initializeMotors();
+    initializeMksUart();
 
     lastControlMicroseconds = micros();
-    Serial.println("Pico target ready. RC input handling is still a stub and should be wired for your receiver.");
+    Serial.println("Pico target ready. Sending torque commands to MKS over UART.");
 }
 
 void loop() {
     handlePauseToggleButton();
 
     if (pauseRequested) {
-        motorLeft.move(0.0f);
-        motorRight.move(0.0f);
-        motorLeft.loopFOC();
-        motorRight.loopFOC();
+        sendMksCommand(0.0f, 0.0f);
         return;
     }
-
-    motorLeft.loopFOC();
-    motorRight.loopFOC();
 
     const uint32_t nowMicroseconds = micros();
     const float deltaTime = (nowMicroseconds - lastControlMicroseconds) * 1e-6f;

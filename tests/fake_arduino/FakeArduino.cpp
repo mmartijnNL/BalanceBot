@@ -30,6 +30,7 @@ int clamp_pin(int pin) {
 }  // namespace
 
 FakeSerial Serial;
+FakeSerial Serial1;
 TwoWire Wire(0);
 TwoWire Wire1(1);
 
@@ -47,6 +48,7 @@ void reset() {
     g_mpu_angle_x = 0.0f;
     g_mpu_gyro_x = 0.0f;
     clear_serial_log();
+    Serial1 = FakeSerial();
 }
 
 void set_millis(uint64_t value) {
