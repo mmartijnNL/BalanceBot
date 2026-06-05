@@ -4,7 +4,7 @@ This folder provides a native host test harness for Arduino sketch logic.
 
 It compiles `BalanceBotEsp32.ino` as regular C++ against fake Arduino/MPU6050/Wire shims, then runs assertions against:
 - simulated pin setup and reads
-- UART command outputs to MKS
+- motor move command outputs
 - serial log text
 
 ## Run tests
