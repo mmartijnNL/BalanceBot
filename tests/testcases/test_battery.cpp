@@ -1,7 +1,7 @@
 #include "fake_arduino/Arduino.h"
 #include <iostream>
 #include <string>
-#include "../BalanceBotPico/BalanceBotPico.ino"
+#include "../BalanceBotEsp32/BalanceBotEsp32.ino"
 #include <cmath>
 #include "../test_utils.h"
 
@@ -12,7 +12,7 @@ void test_low_battery_triggers_cutoff_message() {
     setup();
 
     // Keep battery below cutoff long enough for trip delay.
-    fake_arduino::set_analog(26, 0);
+    fake_arduino::set_analog(34, 0);
     fake_arduino::set_mpu_angle_x(0.0f);
     fake_arduino::set_mpu_gyro_x(0.0f);
 

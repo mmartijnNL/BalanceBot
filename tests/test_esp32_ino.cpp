@@ -2,7 +2,7 @@
 #include "testcases/test_imu.cpp"
 #include "testcases/test_motor.cpp"
 #include "testcases/test_battery.cpp"
-#include "../BalanceBotPico/BalanceBotPico.ino"
+#include "../BalanceBotEsp32/BalanceBotEsp32.ino"
 
 int main() {
     test_setup_configures_pins_and_logs();

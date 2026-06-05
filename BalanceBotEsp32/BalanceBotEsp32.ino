@@ -1,5 +1,5 @@
-#ifndef BALANCE_BOT_PICO_INO
-#define BALANCE_BOT_PICO_INO
+#ifndef BALANCE_BOT_ESP32_INO
+#define BALANCE_BOT_ESP32_INO
 
 #include "BalanceBot.h"
 #include <Arduino.h>
@@ -7,27 +7,26 @@
 #include <MPU6050_light.h>
 #include <stdarg.h>
 #include <stdio.h>
-#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>)
-#include <pico/bootrom.h>
-#endif
 
 namespace {
 
-constexpr uint8_t kImuSdaPin = 4;
-constexpr uint8_t kImuSclPin = 5;
+constexpr uint8_t kImuSdaPin = 21;
+constexpr uint8_t kImuSclPin = 22;
 
-constexpr uint8_t kBatteryAdcPin = 26;
-constexpr uint8_t kRcThrottlePin = 20;
-constexpr uint8_t kRcSteerPin = 21;
+constexpr uint8_t kBatteryAdcPin = 34;
+constexpr uint8_t kRcThrottlePin = 36;
+constexpr uint8_t kRcSteerPin = 39;
 
-constexpr uint8_t kMksUartTxPin = 8;
-constexpr uint8_t kMksUartRxPin = 9;
+constexpr uint8_t kPauseButtonPin = 0;
+constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
+
+constexpr uint8_t kMksUartTxPin = 17;
+constexpr uint8_t kMksUartRxPin = 16;
 constexpr uint32_t kMksUartBaud = 115200;
 
 constexpr float kBatteryDividerRatio = 5.0f;
 constexpr float kAdcReferenceVoltage = 3.3f;
 constexpr float kControlPeriodSeconds = 0.004f;
-constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
 
 TwoWire& imuBus = Wire;
 MPU6050 mpu(imuBus);
@@ -49,11 +48,7 @@ void sendMksCommand(float leftCommand, float rightCommand) {
 }
 
 bool readPauseButtonPressed() {
-#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>)
-    return get_bootsel_button();
-#else
-    return false;
-#endif
+    return digitalRead(kPauseButtonPin) == LOW;
 }
 
 void handlePauseToggleButton() {
@@ -74,12 +69,14 @@ void handlePauseToggleButton() {
     previousPauseButtonPressed = buttonPressed;
 }
 
-void initializeI2cBuses() {
-#if !defined(ARDUINO_ARCH_MBED)
+void initializeI2cBus() {
+#if defined(ARDUINO_ARCH_ESP32)
+    imuBus.begin(kImuSdaPin, kImuSclPin);
+#else
     imuBus.setSDA(kImuSdaPin);
     imuBus.setSCL(kImuSclPin);
-#endif
     imuBus.begin();
+#endif
 }
 
 void initializeImu() {
@@ -93,11 +90,11 @@ void initializeImu() {
 }
 
 void initializeMksUart() {
-#if defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED)
-    Serial1.setTX(kMksUartTxPin);
-    Serial1.setRX(kMksUartRxPin);
-#endif
+#if defined(ARDUINO_ARCH_ESP32)
+    Serial1.begin(kMksUartBaud, SERIAL_8N1, kMksUartRxPin, kMksUartTxPin);
+#else
     Serial1.begin(kMksUartBaud);
+#endif
     sendMksCommand(0.0f, 0.0f);
 }
 
@@ -154,25 +151,23 @@ BalanceBotHardwareAbstractionLayer botHal = {
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("\nBalanceBot Pico boot");
-#if !(defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_ARCH_MBED) && __has_include(<pico/bootrom.h>))
-    Serial.println("Warning: BOOTSEL button API unavailable; pause/resume button control is disabled.");
-#endif
+    Serial.println("\nBalanceBot ESP32 boot");
 
     analogReadResolution(12);
     pinMode(kBatteryAdcPin, INPUT);
-    pinMode(kRcThrottlePin, INPUT_PULLDOWN);
-    pinMode(kRcSteerPin, INPUT_PULLDOWN);
+    pinMode(kRcThrottlePin, INPUT);
+    pinMode(kRcSteerPin, INPUT);
+    pinMode(kPauseButtonPin, INPUT_PULLUP);
 
     BalanceBot_init(&botHal, &botConfiguration, &botState);
     botConfiguration.control_delta_time_seconds = kControlPeriodSeconds;
 
-    initializeI2cBuses();
+    initializeI2cBus();
     initializeImu();
     initializeMksUart();
 
     lastControlMicroseconds = micros();
-    Serial.println("Pico target ready. Sending torque commands to MKS over UART.");
+    Serial.println("LOLIN32 Lite target ready. Sending torque commands to MKS over UART.");
 }
 
 void loop() {
@@ -193,4 +188,4 @@ void loop() {
     BalanceBot_update(&botConfiguration, &botState);
 }
 
-#endif // BALANCE_BOT_PICO_INO
+#endif // BALANCE_BOT_ESP32_INO

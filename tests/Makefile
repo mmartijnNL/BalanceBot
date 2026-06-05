@@ -8,11 +8,11 @@ TARGET = run_ino_tests
 
 all: $(TARGET)
 
-$(TARGET): test_pico_ino.o FakeArduino.o BalanceBot.o
-	$(CXX) $(CXXFLAGS) -o $(TARGET) test_pico_ino.o FakeArduino.o BalanceBot.o
+$(TARGET): test_esp32_ino.o FakeArduino.o BalanceBot.o
+	$(CXX) $(CXXFLAGS) -o $(TARGET) test_esp32_ino.o FakeArduino.o BalanceBot.o
 
-test_pico_ino.o: test_pico_ino.cpp ../BalanceBotPico/BalanceBotPico.ino ../BalanceBot.h
-	$(CXX) $(CXXFLAGS) -c test_pico_ino.cpp -o test_pico_ino.o
+test_esp32_ino.o: test_esp32_ino.cpp ../BalanceBotEsp32/BalanceBotEsp32.ino ../BalanceBot.h
+	$(CXX) $(CXXFLAGS) -c test_esp32_ino.cpp -o test_esp32_ino.o
 
 FakeArduino.o: fake_arduino/FakeArduino.cpp fake_arduino/Arduino.h fake_arduino/Wire.h
 	$(CXX) $(CXXFLAGS) -c fake_arduino/FakeArduino.cpp -o FakeArduino.o

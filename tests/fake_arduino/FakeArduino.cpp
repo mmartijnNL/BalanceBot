@@ -159,7 +159,11 @@ const std::string& FakeSerial::buffer() const {
 }
 
 void pinMode(int pin, int mode) {
-    g_pins[clamp_pin(pin)].mode = mode;
+    const int idx = clamp_pin(pin);
+    g_pins[idx].mode = mode;
+    if (mode == INPUT_PULLUP) {
+        g_pins[idx].digital_value = HIGH;
+    }
 }
 
 void digitalWrite(int pin, int value) {

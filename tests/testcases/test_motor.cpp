@@ -2,7 +2,7 @@
 #include <iostream>
 #include <string>
 #include <cstdio>
-#include "../BalanceBotPico/BalanceBotPico.ino"
+#include "../BalanceBotEsp32/BalanceBotEsp32.ino"
 #include <cmath>
 #include "../test_utils.h"
 

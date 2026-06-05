@@ -9,6 +9,9 @@ using byte = uint8_t;
 constexpr uint8_t INPUT = 0;
 constexpr uint8_t OUTPUT = 1;
 constexpr uint8_t INPUT_PULLDOWN = 2;
+constexpr uint8_t INPUT_PULLUP = 3;
+constexpr uint8_t LOW = 0;
+constexpr uint8_t HIGH = 1;
 
 namespace fake_arduino {
 

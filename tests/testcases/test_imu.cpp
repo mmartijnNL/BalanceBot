@@ -1,7 +1,7 @@
 #include "fake_arduino/Arduino.h"
 #include <iostream>
 #include <string>
-#include "../BalanceBotPico/BalanceBotPico.ino"
+#include "../BalanceBotEsp32/BalanceBotEsp32.ino"
 #include <cmath>
 #include "../test_utils.h"
 

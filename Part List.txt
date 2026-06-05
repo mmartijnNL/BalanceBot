@@ -8,4 +8,4 @@ MPU6050 GY-521 6DOF IMU (3-axis accelerometer + gyroscope)
 
 SimpleFOC Shield MKS Dual FOC V3.2 BLDC servo/stepper controller
 
-Raspberry Pi Pico
+LOLIN32 Lite (ESP32)
