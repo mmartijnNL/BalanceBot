@@ -12,15 +12,18 @@ void test_setup_configures_pins_and_logs() {
 
     setup();
 
-    expect_true(fake_arduino::get_analog_resolution_bits() == 12, "setup should configure 12-bit ADC");
-    expect_true(fake_arduino::get_pin_mode(34) == INPUT, "battery ADC pin should be INPUT");
-    expect_true(fake_arduino::get_pin_mode(36) == INPUT, "throttle pin should be INPUT");
-    expect_true(fake_arduino::get_pin_mode(39) == INPUT, "steer pin should be INPUT");
-    expect_true(fake_arduino::get_pin_mode(0) == INPUT_PULLUP, "pause button pin should be INPUT_PULLUP");
+    expect_true(leftSensor.initialized(), "left AS5600 sensor should be initialized");
+    expect_true(rightSensor.initialized(), "right AS5600 sensor should be initialized");
+    expect_true(leftDriver.initialized(), "left driver should be initialized");
+    expect_true(rightDriver.initialized(), "right driver should be initialized");
+    expect_true(leftMotor.initialized(), "left motor should be initialized");
+    expect_true(rightMotor.initialized(), "right motor should be initialized");
+    expect_true(leftMotor.foc_initialized(), "left motor FOC should be initialized");
+    expect_true(rightMotor.foc_initialized(), "right motor FOC should be initialized");
 
     const std::string logs = fake_arduino::serial_log();
-    expect_contains(logs, "BalanceBot ESP32 boot", "boot banner should be printed");
-    expect_contains(logs, "LOLIN32 Lite target ready", "ready message should be printed");
+    expect_contains(logs, "BalanceBot SimpleFOC boot", "boot banner should be printed");
+    expect_contains(logs, "SimpleFOC motors ready.", "ready message should be printed");
 }
 
 }  // namespace

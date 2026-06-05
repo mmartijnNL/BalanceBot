@@ -6,6 +6,17 @@ constexpr int AS5600_I2C = 0x36;
 
 enum class MotionControlType {
     torque = 0,
+    velocity = 1,
+};
+
+struct PIDController {
+    float P = 0.0f;
+    float I = 0.0f;
+    float D = 0.0f;
+};
+
+struct LowPassFilter {
+    float Tf = 0.0f;
 };
 
 class MagneticSensorI2C {
@@ -57,15 +68,29 @@ class BLDCMotor {
     void initFOC() { foc_initialized_ = true; }
     void loopFOC() { loop_count_++; }
     void move(float voltage) { last_move_command = voltage; }
+    template <typename T>
+    void useMonitoring(T&) {
+        monitoring_enabled_ = true;
+    }
 
     float voltage_limit = 0.0f;
     MotionControlType controller = MotionControlType::torque;
     float last_move_command = 0.0f;
+    float shaft_velocity = 0.0f;
+    float shaft_angle = 0.0f;
+    PIDController PID_velocity;
+    LowPassFilter LPF_velocity;
+
+    bool initialized() const { return initialized_; }
+    bool foc_initialized() const { return foc_initialized_; }
+    bool monitoring_enabled() const { return monitoring_enabled_; }
+    int loop_count() const { return loop_count_; }
 
    private:
     int pole_pairs_ = 0;
     bool initialized_ = false;
     bool foc_initialized_ = false;
+    bool monitoring_enabled_ = false;
     int loop_count_ = 0;
     MagneticSensorI2C* sensor_ = nullptr;
     BLDCDriver3PWM* driver_ = nullptr;

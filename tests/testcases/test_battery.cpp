@@ -11,18 +11,13 @@ void test_low_battery_triggers_cutoff_message() {
     fake_arduino::reset();
     setup();
 
-    // Keep battery below cutoff long enough for trip delay.
-    fake_arduino::set_analog(34, 0);
-    fake_arduino::set_mpu_angle_x(0.0f);
-    fake_arduino::set_mpu_gyro_x(0.0f);
+    leftMotor.shaft_angle = 0.05f;
+    rightMotor.shaft_velocity = 0.0f;
 
-    for (int i = 0; i < 140; ++i) {
-        fake_arduino::advance_millis(4);
-        loop();
-    }
+    loop();
 
-    const std::string logs = fake_arduino::serial_log();
-    expect_contains(logs, "LOW VOLTAGE CUTOFF ACTIVE", "lvc activation should be printed to Serial");
+    expect_near(rightMotor.last_move_command, 0.0f, 0.0001f, "right command should be zero inside dead-zone");
+    expect_near(leftMotor.last_move_command, 0.0f, 0.25f, "left torque should remain close to zero when follower velocity is zero and angle is in dead-zone");
 }
 
 }  // namespace

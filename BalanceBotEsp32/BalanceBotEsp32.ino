@@ -1,191 +1,118 @@
 #ifndef BALANCE_BOT_ESP32_INO
 #define BALANCE_BOT_ESP32_INO
 
-#include "BalanceBot.h"
 #include <Arduino.h>
+#include <SimpleFOC.h>
 #include <Wire.h>
-#include <MPU6050_light.h>
-#include <stdarg.h>
-#include <stdio.h>
+#include <cmath>
 
 namespace {
 
-constexpr uint8_t kImuSdaPin = 21;
-constexpr uint8_t kImuSclPin = 22;
+constexpr uint8_t kLeftI2cSdaPin = 19;
+constexpr uint8_t kLeftI2cSclPin = 18;
+constexpr uint8_t kRightI2cSdaPin = 23;
+constexpr uint8_t kRightI2cSclPin = 5;
 
-constexpr uint8_t kBatteryAdcPin = 34;
-constexpr uint8_t kRcThrottlePin = 36;
-constexpr uint8_t kRcSteerPin = 39;
+constexpr int kMotorPolePairs = 7;
 
-constexpr uint8_t kPauseButtonPin = 0;
-constexpr uint32_t kPauseToggleDebounceMilliseconds = 200;
+constexpr uint8_t kLeftPwmUPin = 32;
+constexpr uint8_t kLeftPwmVPin = 33;
+constexpr uint8_t kLeftPwmWPin = 25;
+constexpr uint8_t kLeftEnablePin = 22;
 
-constexpr uint8_t kMksUartTxPin = 17;
-constexpr uint8_t kMksUartRxPin = 16;
-constexpr uint32_t kMksUartBaud = 115200;
+constexpr uint8_t kRightPwmUPin = 26;
+constexpr uint8_t kRightPwmVPin = 27;
+constexpr uint8_t kRightPwmWPin = 14;
+constexpr uint8_t kRightEnablePin = 12;
 
-constexpr float kBatteryDividerRatio = 5.0f;
-constexpr float kAdcReferenceVoltage = 3.3f;
-constexpr float kControlPeriodSeconds = 0.004f;
+constexpr float kSupplyVoltage = 12.0f;
+constexpr float kMotorVoltageLimit = 12.0f;
+constexpr float kFollowerVelocityGain = 10.0f;
+constexpr float kMasterTorqueGain = 5.0f;
+constexpr float kDeadZoneRadians = 0.2f;
 
-TwoWire& imuBus = Wire;
-MPU6050 mpu(imuBus);
+TwoWire leftI2cBus = TwoWire(0);
+TwoWire rightI2cBus = TwoWire(1);
 
-BalanceBotConfiguration botConfiguration;
-BalanceBotState botState;
-uint32_t lastControlMicroseconds = 0;
-bool pauseRequested = false;
-bool previousPauseButtonPressed = false;
-uint32_t lastPauseToggleMilliseconds = 0;
-float pendingLeftCommand = 0.0f;
-float pendingRightCommand = 0.0f;
+MagneticSensorI2C leftSensor = MagneticSensorI2C(AS5600_I2C);
+MagneticSensorI2C rightSensor = MagneticSensorI2C(AS5600_I2C);
 
-void sendMksCommand(float leftCommand, float rightCommand) {
-    Serial1.print("M ");
-    Serial1.print(leftCommand);
-    Serial1.print(" ");
-    Serial1.println(rightCommand);
+BLDCMotor leftMotor = BLDCMotor(kMotorPolePairs);
+BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmWPin, kLeftEnablePin);
+
+BLDCMotor rightMotor = BLDCMotor(kMotorPolePairs);
+BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRightPwmWPin, kRightEnablePin);
+
+float deadZone(float value) {
+    return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
 }
 
-bool readPauseButtonPressed() {
-    return digitalRead(kPauseButtonPin) == LOW;
-}
-
-void handlePauseToggleButton() {
-    const bool buttonPressed = readPauseButtonPressed();
-    const uint32_t nowMilliseconds = millis();
-    if (buttonPressed && !previousPauseButtonPressed &&
-        (nowMilliseconds - lastPauseToggleMilliseconds) >= kPauseToggleDebounceMilliseconds) {
-        pauseRequested = !pauseRequested;
-        lastPauseToggleMilliseconds = nowMilliseconds;
-        if (pauseRequested) {
-            sendMksCommand(0.0f, 0.0f);
-            Serial.println("Paused: motors commanded to zero.");
-        } else {
-            lastControlMicroseconds = micros();
-            Serial.println("Resumed: balancing update loop running.");
-        }
-    }
-    previousPauseButtonPressed = buttonPressed;
-}
-
-void initializeI2cBus() {
+void initializeI2cBuses() {
 #if defined(ARDUINO_ARCH_ESP32)
-    imuBus.begin(kImuSdaPin, kImuSclPin);
+    leftI2cBus.begin(kLeftI2cSdaPin, kLeftI2cSclPin, 400000);
+    rightI2cBus.begin(kRightI2cSdaPin, kRightI2cSclPin, 400000);
 #else
-    imuBus.setSDA(kImuSdaPin);
-    imuBus.setSCL(kImuSclPin);
-    imuBus.begin();
-#endif
-}
+    leftI2cBus.setSDA(kLeftI2cSdaPin);
+    leftI2cBus.setSCL(kLeftI2cSclPin);
+    leftI2cBus.begin();
 
-void initializeImu() {
-    byte imuStatus = mpu.begin();
-    if (imuStatus != 0) {
-        Serial.print("MPU6050 init failed: ");
-        Serial.println(static_cast<int>(imuStatus));
-        return;
-    }
-    mpu.calcOffsets(true, true);
-}
-
-void initializeMksUart() {
-#if defined(ARDUINO_ARCH_ESP32)
-    Serial1.begin(kMksUartBaud, SERIAL_8N1, kMksUartRxPin, kMksUartTxPin);
-#else
-    Serial1.begin(kMksUartBaud);
+    rightI2cBus.setSDA(kRightI2cSdaPin);
+    rightI2cBus.setSCL(kRightI2cSclPin);
+    rightI2cBus.begin();
 #endif
-    sendMksCommand(0.0f, 0.0f);
 }
 
 }  // namespace
 
-uint32_t hal_millis(void) { return millis(); }
-uint32_t hal_micros(void) { return micros(); }
-void hal_serial_print(const char* text) { Serial.print(text); }
-void hal_serial_printf(const char* fmt, ...) {
-    char buffer[128];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    Serial.print(buffer);
-}
-uint16_t hal_analog_read(int pin) { return analogRead(pin); }
-void hal_motor_left_move(float voltage) { pendingLeftCommand = voltage; }
-void hal_motor_right_move(float voltage) {
-    pendingRightCommand = -voltage;
-    sendMksCommand(pendingLeftCommand, pendingRightCommand);
-}
-float hal_get_rc_throttle(void) { return 0.0f; }
-float hal_get_rc_steer(void) { return 0.0f; }
-float hal_get_pitch_deg(void) {
-    mpu.update();
-    return mpu.getAngleX();
-}
-float hal_get_gyro_pitch_rate_dps(void) {
-    mpu.update();
-    return mpu.getGyroX();
-}
-float hal_get_battery_voltage(void) {
-    const float raw = static_cast<float>(analogRead(kBatteryAdcPin));
-    const float adcVoltage = (raw / 4095.0f) * kAdcReferenceVoltage;
-    return adcVoltage * kBatteryDividerRatio;
-}
-
-BalanceBotHardwareAbstractionLayer botHal = {
-    hal_millis,
-    hal_micros,
-    hal_serial_print,
-    hal_serial_printf,
-    hal_analog_read,
-    hal_motor_left_move,
-    hal_motor_right_move,
-    hal_get_rc_throttle,
-    hal_get_rc_steer,
-    hal_get_pitch_deg,
-    hal_get_gyro_pitch_rate_dps,
-    hal_get_battery_voltage,
-};
-
 void setup() {
     Serial.begin(115200);
-    delay(500);
-    Serial.println("\nBalanceBot ESP32 boot");
+    delay(250);
+    Serial.println("\nBalanceBot SimpleFOC boot");
 
-    analogReadResolution(12);
-    pinMode(kBatteryAdcPin, INPUT);
-    pinMode(kRcThrottlePin, INPUT);
-    pinMode(kRcSteerPin, INPUT);
-    pinMode(kPauseButtonPin, INPUT_PULLUP);
+    initializeI2cBuses();
+    leftSensor.init(&leftI2cBus);
+    rightSensor.init(&rightI2cBus);
 
-    BalanceBot_init(&botHal, &botConfiguration, &botState);
-    botConfiguration.control_delta_time_seconds = kControlPeriodSeconds;
+    leftMotor.linkSensor(&leftSensor);
+    rightMotor.linkSensor(&rightSensor);
 
-    initializeI2cBus();
-    initializeImu();
-    initializeMksUart();
+    leftDriver.voltage_power_supply = kSupplyVoltage;
+    leftDriver.init();
+    rightDriver.voltage_power_supply = kSupplyVoltage;
+    rightDriver.init();
 
-    lastControlMicroseconds = micros();
-    Serial.println("LOLIN32 Lite target ready. Sending torque commands to MKS over UART.");
+    leftMotor.linkDriver(&leftDriver);
+    rightMotor.linkDriver(&rightDriver);
+
+    leftMotor.controller = MotionControlType::torque;
+    rightMotor.controller = MotionControlType::velocity;
+
+    leftMotor.voltage_limit = kMotorVoltageLimit;
+    rightMotor.voltage_limit = kMotorVoltageLimit;
+    rightMotor.LPF_velocity.Tf = 0.01f;
+    rightMotor.PID_velocity.I = 1.0f;
+
+    leftMotor.useMonitoring(Serial);
+    rightMotor.useMonitoring(Serial);
+
+    leftMotor.init();
+    rightMotor.init();
+    leftMotor.initFOC();
+    rightMotor.initFOC();
+
+    Serial.println("SimpleFOC motors ready.");
 }
 
 void loop() {
-    handlePauseToggleButton();
+    leftMotor.loopFOC();
+    rightMotor.loopFOC();
 
-    if (pauseRequested) {
-        sendMksCommand(0.0f, 0.0f);
-        return;
-    }
+    const float leftAngle = leftMotor.shaft_angle;
+    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(leftAngle);
+    rightMotor.move(followerVelocityTarget);
 
-    const uint32_t nowMicroseconds = micros();
-    const float deltaTime = (nowMicroseconds - lastControlMicroseconds) * 1e-6f;
-    if (deltaTime < botConfiguration.control_delta_time_seconds) {
-        return;
-    }
-
-    lastControlMicroseconds = nowMicroseconds;
-    BalanceBot_update(&botConfiguration, &botState);
+    const float masterTorqueTarget = kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - leftAngle);
+    leftMotor.move(masterTorqueTarget);
 }
 
 #endif // BALANCE_BOT_ESP32_INO

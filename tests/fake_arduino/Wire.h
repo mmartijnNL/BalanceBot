@@ -9,6 +9,11 @@ class TwoWire {
     void setSDA(uint8_t pin) { sda_pin_ = pin; }
     void setSCL(uint8_t pin) { scl_pin_ = pin; }
     void begin() { begun_ = true; }
+    void begin(uint8_t sda, uint8_t scl, uint32_t) {
+        sda_pin_ = sda;
+        scl_pin_ = scl;
+        begun_ = true;
+    }
 
     uint8_t index() const { return index_; }
     bool begun() const { return begun_; }

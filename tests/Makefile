@@ -1,24 +1,19 @@
 CXX = g++
-CC = gcc
 
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -I. -Ifake_arduino -I..
-CFLAGS = -std=c11 -O2 -Wall -Wextra -I..
 
 TARGET = run_ino_tests
 
 all: $(TARGET)
 
-$(TARGET): test_esp32_ino.o FakeArduino.o BalanceBot.o
-	$(CXX) $(CXXFLAGS) -o $(TARGET) test_esp32_ino.o FakeArduino.o BalanceBot.o
+$(TARGET): test_esp32_ino.o FakeArduino.o
+	$(CXX) $(CXXFLAGS) -o $(TARGET) test_esp32_ino.o FakeArduino.o
 
 test_esp32_ino.o: test_esp32_ino.cpp ../BalanceBotEsp32/BalanceBotEsp32.ino ../BalanceBot.h
 	$(CXX) $(CXXFLAGS) -c test_esp32_ino.cpp -o test_esp32_ino.o
 
 FakeArduino.o: fake_arduino/FakeArduino.cpp fake_arduino/Arduino.h fake_arduino/Wire.h
 	$(CXX) $(CXXFLAGS) -c fake_arduino/FakeArduino.cpp -o FakeArduino.o
-
-BalanceBot.o: ../BalanceBot.c ../BalanceBot.h
-	$(CC) $(CFLAGS) -c ../BalanceBot.c -o BalanceBot.o
 
 run: $(TARGET)
 	./$(TARGET)
