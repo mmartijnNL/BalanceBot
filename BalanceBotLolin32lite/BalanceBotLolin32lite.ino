@@ -1,5 +1,5 @@
-#ifndef BALANCE_BOT_ESP32_INO
-#define BALANCE_BOT_ESP32_INO
+#ifndef BALANCE_BOT_LOLIN32LITE_INO
+#define BALANCE_BOT_LOLIN32LITE_INO
 
 #include <Arduino.h>
 #include <SimpleFOC.h>
@@ -115,4 +115,4 @@ void loop() {
     leftMotor.move(masterTorqueTarget);
 }
 
-#endif // BALANCE_BOT_ESP32_INO
+#endif // BALANCE_BOT_LOLIN32LITE_INO

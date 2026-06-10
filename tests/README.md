@@ -2,7 +2,7 @@
 
 This folder provides a native host test harness for Arduino sketch logic.
 
-It compiles `BalanceBotEsp32.ino` as regular C++ against fake Arduino/MPU6050/Wire shims, then runs assertions against:
+It compiles `BalanceBotLolin32lite.ino` as regular C++ against fake Arduino/MPU6050/Wire shims, then runs assertions against:
 - simulated pin setup and reads
 - motor move command outputs
 - serial log text
@@ -17,7 +17,7 @@ make -C tests run
 
 ## Add tests
 
-Edit `tests/test_esp32_ino.cpp` and add new test functions.
+Edit `tests/test_lolin32lite_ino.cpp` and add new test functions.
 
 Useful helpers:
 - `fake_arduino::set_analog(pin, value)` to inject ADC values
