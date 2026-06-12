@@ -9,6 +9,7 @@ namespace {
 
 void test_setup_configures_pins_and_logs() {
     fake_arduino::reset();
+    fake_arduino::set_mpu_begin_status(0);
 
     setup();
 
@@ -23,6 +24,7 @@ void test_setup_configures_pins_and_logs() {
 
     const std::string logs = fake_arduino::serial_log();
     expect_contains(logs, "BalanceBot SimpleFOC boot", "boot banner should be printed");
+    expect_true(logs.find("MPU6050 init failed") == std::string::npos, "setup should not log MPU init failure on success path");
     expect_contains(logs, "SimpleFOC motors ready.", "ready message should be printed");
 }
 

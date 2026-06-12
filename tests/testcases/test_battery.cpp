@@ -11,7 +11,8 @@ void test_low_battery_triggers_cutoff_message() {
     fake_arduino::reset();
     setup();
 
-    leftMotor.shaft_angle = 0.05f;
+    fake_arduino::set_mpu_angle_x(2.0f);
+    fake_arduino::set_mpu_gyro_x(0.0f);
     rightMotor.shaft_velocity = 0.0f;
 
     loop();

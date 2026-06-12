@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <SimpleFOC.h>
+#include <MPU6050_light.h>
 #include <Wire.h>
 #include <cmath>
 
@@ -29,13 +30,16 @@ constexpr float kSupplyVoltage = 12.0f;
 constexpr float kMotorVoltageLimit = 12.0f;
 constexpr float kFollowerVelocityGain = 10.0f;
 constexpr float kMasterTorqueGain = 5.0f;
+constexpr float kPitchRateDampingGain = 0.08f;
 constexpr float kDeadZoneRadians = 0.2f;
+constexpr float kDegreesToRadians = 0.017453292519943295f;
 
 TwoWire leftI2cBus = TwoWire(0);
 TwoWire rightI2cBus = TwoWire(1);
 
 MagneticSensorI2C leftSensor = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C rightSensor = MagneticSensorI2C(AS5600_I2C);
+MPU6050 imu = MPU6050(leftI2cBus);
 
 BLDCMotor leftMotor = BLDCMotor(kMotorPolePairs);
 BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmWPin, kLeftEnablePin);
@@ -70,6 +74,15 @@ void setup() {
     Serial.println("\nBalanceBot SimpleFOC boot");
 
     initializeI2cBuses();
+
+    const byte imuStatus = imu.begin();
+    if (imuStatus != 0) {
+        Serial.print("MPU6050 init failed, status=");
+        Serial.println(static_cast<int>(imuStatus));
+    } else {
+        imu.calcOffsets(true, true);
+    }
+
     leftSensor.init(&leftI2cBus);
     rightSensor.init(&rightI2cBus);
 
@@ -107,11 +120,15 @@ void loop() {
     leftMotor.loopFOC();
     rightMotor.loopFOC();
 
-    const float leftAngle = leftMotor.shaft_angle;
-    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(leftAngle);
+    imu.update();
+    const float pitchRadians = imu.getAngleX() * kDegreesToRadians;
+    const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
+
+    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(pitchRadians);
     rightMotor.move(followerVelocityTarget);
 
-    const float masterTorqueTarget = kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - leftAngle);
+    const float masterTorqueTarget = (kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - pitchRadians))
+        - (kPitchRateDampingGain * pitchRateRadiansPerSecond);
     leftMotor.move(masterTorqueTarget);
 }
 
