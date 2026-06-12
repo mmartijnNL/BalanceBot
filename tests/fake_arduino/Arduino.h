@@ -38,6 +38,8 @@ uint8_t get_mpu_begin_status();
 float get_mpu_angle_x();
 float get_mpu_gyro_x();
 
+void set_pin_pulse(int pin, unsigned long value_us);
+
 std::string serial_log();
 void clear_serial_log();
 
@@ -69,6 +71,8 @@ void digitalWrite(int pin, int value);
 int digitalRead(int pin);
 int analogRead(int pin);
 void analogReadResolution(int bits);
+
+unsigned long pulseIn(uint8_t pin, uint8_t state, unsigned long timeout = 25000UL);
 
 unsigned long millis();
 unsigned long micros();

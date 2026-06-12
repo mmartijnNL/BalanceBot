@@ -11,6 +11,7 @@ namespace {
 
 constexpr int kMaxPins = 64;
 std::array<fake_arduino::PinState, kMaxPins> g_pins;
+std::array<unsigned long, kMaxPins> g_pin_pulse;
 uint64_t g_now_ms = 0;
 int g_analog_resolution_bits = 10;
 uint8_t g_mpu_begin_status = 0;
@@ -42,6 +43,7 @@ void reset() {
         pin.digital_value = 0;
         pin.analog_value = 0;
     }
+    g_pin_pulse.fill(0UL);
     g_now_ms = 0;
     g_analog_resolution_bits = 10;
     g_mpu_begin_status = 0;
@@ -101,6 +103,10 @@ float get_mpu_angle_x() {
 
 float get_mpu_gyro_x() {
     return g_mpu_gyro_x;
+}
+
+void set_pin_pulse(int pin, unsigned long value_us) {
+    g_pin_pulse[clamp_pin(pin)] = value_us;
 }
 
 std::string serial_log() {
@@ -192,4 +198,8 @@ unsigned long micros() {
 
 void delay(unsigned long milliseconds) {
     g_now_ms += milliseconds;
+}
+
+unsigned long pulseIn(uint8_t pin, uint8_t /*state*/, unsigned long /*timeout*/) {
+    return g_pin_pulse[clamp_pin(static_cast<int>(pin))];
 }

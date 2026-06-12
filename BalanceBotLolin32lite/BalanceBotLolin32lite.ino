@@ -26,11 +26,16 @@ constexpr uint8_t kRightPwmVPin = 27;
 constexpr uint8_t kRightPwmWPin = 14;
 constexpr uint8_t kRightEnablePin = 12;
 
+constexpr uint8_t kRcThrottlePin = 34;
+constexpr uint8_t kRcSteerPin = 35;
+
 constexpr float kSupplyVoltage = 12.0f;
 constexpr float kMotorVoltageLimit = 12.0f;
 constexpr float kFollowerVelocityGain = 10.0f;
 constexpr float kMasterTorqueGain = 5.0f;
 constexpr float kPitchRateDampingGain = 0.08f;
+constexpr float kRcThrottleAngleGain = 0.15f;
+constexpr float kRcSteerVelocityGain = 2.0f;
 constexpr float kDeadZoneRadians = 0.2f;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
 
@@ -49,6 +54,18 @@ BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRight
 
 float deadZone(float value) {
     return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
+}
+
+float readRcChannel(uint8_t pin) {
+    constexpr unsigned long kRcPulseMin = 1000UL;
+    constexpr unsigned long kRcPulseMax = 2000UL;
+    constexpr unsigned long kRcPulseCenter = 1500UL;
+    constexpr unsigned long kRcTimeout = 25000UL;
+    const unsigned long pulse = pulseIn(pin, HIGH, kRcTimeout);
+    if (pulse == 0) return 0.0f;
+    const unsigned long clamped = (pulse < kRcPulseMin) ? kRcPulseMin
+        : (pulse > kRcPulseMax ? kRcPulseMax : pulse);
+    return static_cast<float>(static_cast<long>(clamped) - static_cast<long>(kRcPulseCenter)) / 500.0f;
 }
 
 void initializeI2cBuses() {
@@ -72,6 +89,9 @@ void setup() {
     Serial.begin(115200);
     delay(250);
     Serial.println("\nBalanceBot SimpleFOC boot");
+
+    pinMode(kRcThrottlePin, INPUT);
+    pinMode(kRcSteerPin, INPUT);
 
     initializeI2cBuses();
 
@@ -124,10 +144,16 @@ void loop() {
     const float pitchRadians = imu.getAngleX() * kDegreesToRadians;
     const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
 
-    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(pitchRadians);
+    const float rcThrottle = readRcChannel(kRcThrottlePin);
+    const float rcSteer = readRcChannel(kRcSteerPin);
+    const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
+    const float effectivePitch = pitchRadians - targetPitchRadians;
+    const float steerBias = rcSteer * kRcSteerVelocityGain;
+
+    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(effectivePitch) + steerBias;
     rightMotor.move(followerVelocityTarget);
 
-    const float masterTorqueTarget = (kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - pitchRadians))
+    const float masterTorqueTarget = (kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - effectivePitch))
         - (kPitchRateDampingGain * pitchRateRadiansPerSecond);
     leftMotor.move(masterTorqueTarget);
 }
