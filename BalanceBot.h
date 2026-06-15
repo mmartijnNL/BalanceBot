@@ -25,8 +25,6 @@ struct BalanceBotHardwareAbstractionLayer {
     // InterIntegratedCircuit/Sensors
     float (*get_pitch_degrees)(void);
     float (*get_gyroscope_pitch_rate_degrees_per_second)(void);
-    // Battery
-    float (*get_battery_voltage)(void);
 };
 
 // Configuration and state
@@ -46,10 +44,6 @@ struct BalanceBotState {
     float rc_target_angle_degrees, rc_steering_command;
     float rc_throttle_filtered, rc_steer_filtered;
     bool rc_signal_valid;
-    // Battery
-    float battery_voltage_filtered;
-    bool low_voltage_cutoff_active;
-    unsigned long low_voltage_cutoff_below_since_milliseconds;
     // Control
     bool balancing_enabled;
 };

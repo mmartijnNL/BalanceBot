@@ -12,7 +12,6 @@ static double sim_pitch_degrees = 10.0;
 static double sim_gyroscope_degrees_per_second = 0.0;
 static double sim_pitch_noise_degrees = 0.0;
 static double sim_gyroscope_noise_degrees_per_second = 0.0;
-static double sim_battery_voltage = 16.8;
 static double sim_left_motor_command_voltage = 0.0;
 static double sim_right_motor_command_voltage = 0.0;
 static double sim_left_motor_actual_voltage = 0.0;
@@ -40,7 +39,6 @@ float sim_get_rc_throttle(void) { return (float)sim_rc_throttle; }
 float sim_get_rc_steer(void) { return (float)sim_rc_steer; }
 float sim_get_pitch_degrees(void) { return (float)(sim_pitch_degrees + sim_pitch_noise_degrees); }
 float sim_get_gyroscope_pitch_rate_degrees_per_second(void) { return (float)(sim_gyroscope_degrees_per_second + sim_gyroscope_noise_degrees_per_second); }
-float sim_get_battery_voltage(void) { return (float)sim_battery_voltage; }
 
 struct BalanceBotHardwareAbstractionLayer sim_hardware_abstraction_layer = {
     sim_milliseconds,
@@ -53,8 +51,7 @@ struct BalanceBotHardwareAbstractionLayer sim_hardware_abstraction_layer = {
     sim_get_rc_throttle,
     sim_get_rc_steer,
     sim_get_pitch_degrees,
-    sim_get_gyroscope_pitch_rate_degrees_per_second,
-    sim_get_battery_voltage
+    sim_get_gyroscope_pitch_rate_degrees_per_second
 };
 
 static double clampd(double x, double lo, double hi) {
@@ -94,13 +91,6 @@ static void update_rc_profile(double time) {
 
     sim_rc_throttle = sample_smooth_profile(time, times, throttle_vals, n);
     sim_rc_steer = sample_smooth_profile(time, times, steer_vals, n);
-}
-
-static void update_battery_model(double delta_time) {
-    double effort = fabs(sim_left_motor_actual_voltage) + fabs(sim_right_motor_actual_voltage);
-    // Decay to trigger low voltage cutoff near the end of simulation.
-    sim_battery_voltage -= (0.01 + 0.003 * effort) * delta_time;
-    if (sim_battery_voltage < 12.0) sim_battery_voltage = 12.0;
 }
 
 static void apply_motor_driver_dynamics(double delta_time) {
@@ -150,7 +140,7 @@ int main(void) {
     }
 
     fprintf(csv,
-        "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,batt_v,rc_thr,rc_str,target_angle_deg,steering_cmd,lvc_active,kp_angle,ki_angle,kd_angle,kp_rate,ki_rate,kd_rate\n");
+        "t,pitch_deg,gyro_dps,pitch_meas_deg,gyro_meas_dps,left_cmd_v,right_cmd_v,left_actual_v,right_actual_v,rc_thr,rc_str,target_angle_deg,steering_cmd,kp_angle,ki_angle,kd_angle,kp_rate,ki_rate,kd_rate\n");
 
     for (int i = 0; i <= steps; ++i) {
         double time = i * dt;
@@ -164,7 +154,6 @@ int main(void) {
 
         apply_motor_driver_dynamics(dt);
         update_plant(dt, time);
-        update_battery_model(dt);
 
         // Optional autotune (simple gradient descent on squared error)
         float error = (state.rc_target_angle_degrees - sim_pitch_degrees) * (state.rc_target_angle_degrees - sim_pitch_degrees);
@@ -187,7 +176,7 @@ int main(void) {
             prev_error = error;
         }
         fprintf(csv,
-            "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
             time,
             sim_pitch_degrees,
             sim_gyroscope_degrees_per_second,
@@ -197,12 +186,10 @@ int main(void) {
             sim_right_motor_command_voltage,
             sim_left_motor_actual_voltage,
             sim_right_motor_actual_voltage,
-            sim_battery_voltage,
             sim_rc_throttle,
             sim_rc_steer,
             state.rc_target_angle_degrees,
             state.rc_steering_command,
-            state.low_voltage_cutoff_active ? 1 : 0,
             configuration.proportional_gain_angle, configuration.integral_gain_angle, configuration.derivative_gain_angle, configuration.proportional_gain_rate, configuration.integral_gain_rate, configuration.derivative_gain_rate);
     }
 

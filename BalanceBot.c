@@ -29,9 +29,6 @@ void BalanceBot_init(const struct BalanceBotHardwareAbstractionLayer* hardware_a
         state->rc_throttle_filtered = 0.0f;
         state->rc_steer_filtered = 0.0f;
         state->rc_signal_valid = false;
-        state->battery_voltage_filtered = -1.0f;
-        state->low_voltage_cutoff_active = false;
-        state->low_voltage_cutoff_below_since_milliseconds = 0;
         state->balancing_enabled = false;
     }
 }
@@ -54,34 +51,6 @@ void BalanceBot_update(struct BalanceBotConfiguration* configuration, struct Bal
     state->rc_target_angle_degrees = state->rc_throttle_filtered * 6.0f; // RC_MAX_TARGET_ANGLE_DEG
     state->rc_steering_command = state->rc_steer_filtered * 1.8f; // RC_MAX_STEER_CMD
     state->rc_signal_valid = true; // For simulation, always valid
-
-    // Battery voltage filtering
-    float battery_voltage = g_hardware_abstraction_layer->get_battery_voltage();
-    if (state->battery_voltage_filtered < 0.0f) {
-        state->battery_voltage_filtered = battery_voltage;
-    } else {
-        state->battery_voltage_filtered += 0.08f * (battery_voltage - state->battery_voltage_filtered);
-    }
-    // Low voltage cutoff logic (simplified)
-    float low_voltage_cutoff = 4 * 3.30f; // BATTERY_SERIES_CELLS * LVC_CUTOFF_PER_CELL_V
-    float low_voltage_recover = 4 * 3.45f;
-    unsigned long now_milliseconds = g_hardware_abstraction_layer->milliseconds();
-    if (!state->low_voltage_cutoff_active) {
-        if (state->battery_voltage_filtered <= low_voltage_cutoff) {
-            if (state->low_voltage_cutoff_below_since_milliseconds == 0) state->low_voltage_cutoff_below_since_milliseconds = now_milliseconds;
-            if ((now_milliseconds - state->low_voltage_cutoff_below_since_milliseconds) >= 500) {
-                state->low_voltage_cutoff_active = true;
-                state->balancing_enabled = false;
-                g_hardware_abstraction_layer->serial_print("LOW VOLTAGE CUTOFF ACTIVE\n");
-            }
-        } else {
-            state->low_voltage_cutoff_below_since_milliseconds = 0;
-        }
-    } else if (state->battery_voltage_filtered >= low_voltage_recover) {
-        state->low_voltage_cutoff_active = false;
-        state->low_voltage_cutoff_below_since_milliseconds = 0;
-        g_hardware_abstraction_layer->serial_print("LOW VOLTAGE CUTOFF CLEARED\n");
-    }
 
     // Main control logic
     float pitch_degrees = g_hardware_abstraction_layer->get_pitch_degrees();
