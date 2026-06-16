@@ -29,22 +29,26 @@ constexpr uint8_t kRightEnablePin = 12;
 constexpr uint8_t kRcThrottlePin = 34;
 constexpr uint8_t kRcSteerPin = 35;
 
-constexpr float kSupplyVoltage = 12.0f;
-constexpr float kMotorVoltageLimit = 12.0f;
-constexpr float kFollowerVelocityGain = 10.0f;
-constexpr float kMasterTorqueGain = 5.0f;
-constexpr float kPitchRateDampingGain = 0.08f;
+constexpr float kSupplyVoltage = 16.8f;
+constexpr float kMotorVoltageLimit = 10.0f;
+constexpr float kBalanceAngleGain = 8.0f;
+constexpr float kPitchRateDampingGain = 0.20f;
+constexpr float kWheelVelocityDampingGain = 0.04f;
 constexpr float kRcThrottleAngleGain = 0.15f;
-constexpr float kRcSteerVelocityGain = 2.0f;
-constexpr float kDeadZoneRadians = 0.2f;
+constexpr float kRcSteerTorqueGain = 1.6f;
+constexpr float kDeadZoneRadians = 0.05f;
+constexpr float kMaxTiltForDriveRadians = 0.75f;
+constexpr float kMaxTorqueCommand = 8.0f;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
+constexpr float kLeftMotorDirection = 1.0f;
+constexpr float kRightMotorDirection = 1.0f;
 
 TwoWire leftI2cBus = TwoWire(0);
 TwoWire rightI2cBus = TwoWire(1);
 
 MagneticSensorI2C leftSensor = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C rightSensor = MagneticSensorI2C(AS5600_I2C);
-MPU6050 imu = MPU6050(leftI2cBus);
+MPU6050 imu = MPU6050(rightI2cBus);
 
 BLDCMotor leftMotor = BLDCMotor(kMotorPolePairs);
 BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmWPin, kLeftEnablePin);
@@ -54,6 +58,12 @@ BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRight
 
 float deadZone(float value) {
     return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
+}
+
+float clampAbs(float value, float limit) {
+    if (value > limit) return limit;
+    if (value < -limit) return -limit;
+    return value;
 }
 
 float readRcChannel(uint8_t pin) {
@@ -118,12 +128,10 @@ void setup() {
     rightMotor.linkDriver(&rightDriver);
 
     leftMotor.controller = MotionControlType::torque;
-    rightMotor.controller = MotionControlType::velocity;
+    rightMotor.controller = MotionControlType::torque;
 
     leftMotor.voltage_limit = kMotorVoltageLimit;
     rightMotor.voltage_limit = kMotorVoltageLimit;
-    rightMotor.LPF_velocity.Tf = 0.01f;
-    rightMotor.PID_velocity.I = 1.0f;
 
     leftMotor.useMonitoring(Serial);
     rightMotor.useMonitoring(Serial);
@@ -148,14 +156,25 @@ void loop() {
     const float rcSteer = readRcChannel(kRcSteerPin);
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
     const float effectivePitch = pitchRadians - targetPitchRadians;
-    const float steerBias = rcSteer * kRcSteerVelocityGain;
+    const float averageWheelVelocity = 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity);
 
-    const float followerVelocityTarget = kFollowerVelocityGain * deadZone(effectivePitch) + steerBias;
-    rightMotor.move(followerVelocityTarget);
+    if (std::fabs(effectivePitch) > kMaxTiltForDriveRadians) {
+        leftMotor.move(0.0f);
+        rightMotor.move(0.0f);
+        return;
+    }
 
-    const float masterTorqueTarget = (kMasterTorqueGain * ((rightMotor.shaft_velocity / 10.0f) - effectivePitch))
-        - (kPitchRateDampingGain * pitchRateRadiansPerSecond);
-    leftMotor.move(masterTorqueTarget);
+    const float balanceTorqueTarget =
+        (-kBalanceAngleGain * deadZone(effectivePitch))
+        - (kPitchRateDampingGain * pitchRateRadiansPerSecond)
+        - (kWheelVelocityDampingGain * averageWheelVelocity);
+    const float steerTorque = rcSteer * kRcSteerTorqueGain;
+
+    const float leftTorque = clampAbs(balanceTorqueTarget - steerTorque, kMaxTorqueCommand);
+    const float rightTorque = clampAbs(balanceTorqueTarget + steerTorque, kMaxTorqueCommand);
+
+    leftMotor.move(kLeftMotorDirection * leftTorque);
+    rightMotor.move(kRightMotorDirection * rightTorque);
 }
 
 #endif // BALANCE_BOT_LOLIN32LITE_INO

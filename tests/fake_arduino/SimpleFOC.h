@@ -7,6 +7,7 @@ constexpr int AS5600_I2C = 0x36;
 enum class MotionControlType {
     torque = 0,
     velocity = 1,
+    velocity_openloop = 2,
 };
 
 struct PIDController {
