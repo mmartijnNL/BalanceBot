@@ -34,9 +34,9 @@ constexpr float kSupplyVoltage = 16.8f;
 constexpr float kMotorVoltageLimit = 8.0f;
 
 // --- PID tuning values ---
-constexpr float kP = 2.0f;   // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kP = 5.0f;   // Proportional: stiffness, how hard the bot fights tilt
 constexpr float kI = 0.1f;   // Integral:     corrects steady-state lean bias (start at 0, increase slowly)
-constexpr float kD = 0.56f;  // Derivative:   damping, reduces oscillation (uses pitch rate from gyro)
+constexpr float kD = 0.5f;  // Derivative:   damping, reduces oscillation (uses pitch rate from gyro)
 // ---------------------------
 
 constexpr float kIntegralClamp = 1.0f;       // Anti-windup: max magnitude of the integral term
@@ -44,14 +44,10 @@ constexpr float kWheelVelocityDampingGain = 0.10f;
 
 constexpr float kRcThrottleAngleGain = 0.15f;
 constexpr float kRcSteerTorqueGain = 1.6f;
-constexpr float kDeadZoneRadians = 0.02f;
-constexpr float kMaxTorqueCommand = 3.2f;
-constexpr float kMaxTorqueStepPerLoop = 0.05f;
-constexpr float kPitchFilterAlpha = 0.16f;
 constexpr unsigned long kTelemetryPeriodMs = 250UL;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
-constexpr float kLeftMotorDirection = 1.0f;
-constexpr float kRightMotorDirection = -1.0f;
+constexpr float kLeftMotorDirection =   1.0f;
+constexpr float kRightMotorDirection =  -1.0f;
 
 TwoWire leftI2cBus = TwoWire(0);
 TwoWire rightI2cBus = TwoWire(1);
@@ -66,28 +62,14 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmW
 BLDCMotor rightMotor = BLDCMotor(kMotorPolePairs);
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRightPwmWPin, kRightEnablePin);
 
-float filteredPitchRadians = 0.0f;
 float pitchIntegral = 0.0f;
-float lastLeftTorqueCommand = 0.0f;
-float lastRightTorqueCommand = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
 unsigned long lastLoopMs = 0UL;
-
-float deadZone(float value) {
-    return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
-}
 
 float clampAbs(float value, float limit) {
     if (value > limit) return limit;
     if (value < -limit) return -limit;
     return value;
-}
-
-float slewLimit(float target, float previous, float maxStep) {
-    const float delta = target - previous;
-    if (delta > maxStep) return previous + maxStep;
-    if (delta < -maxStep) return previous - maxStep;
-    return target;
 }
 
 float readRcChannel(uint8_t pin) {
@@ -168,9 +150,6 @@ void setup() {
     rightMotor.initFOC();
 
     imu.update();
-    filteredPitchRadians = imu.getAngleX() * kDegreesToRadians;
-    lastLeftTorqueCommand = 0.0f;
-    lastRightTorqueCommand = 0.0f;
 
     const unsigned long nowMs = millis();
     lastTelemetryMs = nowMs;
@@ -187,7 +166,6 @@ void loop() {
     imu.update();
     const float pitchRadians = imu.getAngleX() * kDegreesToRadians;
     const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
-    filteredPitchRadians += kPitchFilterAlpha * (pitchRadians - filteredPitchRadians);
 
     const unsigned long nowMs = millis();
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
@@ -196,28 +174,25 @@ void loop() {
     const float rcThrottle = kEnableRcReceiver ? readRcChannel(kRcThrottlePin) : 0.0f;
     const float rcSteer = kEnableRcReceiver ? readRcChannel(kRcSteerPin) : 0.0f;
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
-    const float effectivePitch = filteredPitchRadians - targetPitchRadians;
+    const float effectivePitch = pitchRadians - targetPitchRadians;
     const float averageWheelVelocity = 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity);
 
     // Integral: accumulate error over time, clamped to prevent windup
-    pitchIntegral += deadZone(effectivePitch) * dtSeconds;
+    pitchIntegral += effectivePitch * dtSeconds;
     pitchIntegral = clampAbs(pitchIntegral, kIntegralClamp);
 
     const float balanceTorqueTarget =
-        (-kP * deadZone(effectivePitch))           // Proportional
+        (-kP * effectivePitch)                     // Proportional
         - (kI * pitchIntegral)                     // Integral
         - (kD * pitchRateRadiansPerSecond)          // Derivative
         - (kWheelVelocityDampingGain * averageWheelVelocity);
     const float steerTorque = rcSteer * kRcSteerTorqueGain;
 
-    const float leftTorque = clampAbs(balanceTorqueTarget - steerTorque, kMaxTorqueCommand);
-    const float rightTorque = clampAbs(balanceTorqueTarget + steerTorque, kMaxTorqueCommand);
+    const float leftTorque = balanceTorqueTarget - steerTorque;
+    const float rightTorque = balanceTorqueTarget + steerTorque;
 
-    lastLeftTorqueCommand = slewLimit(leftTorque, lastLeftTorqueCommand, kMaxTorqueStepPerLoop);
-    lastRightTorqueCommand = slewLimit(rightTorque, lastRightTorqueCommand, kMaxTorqueStepPerLoop);
-
-    leftMotor.move(kLeftMotorDirection * lastLeftTorqueCommand);
-    rightMotor.move(kRightMotorDirection * lastRightTorqueCommand);
+    leftMotor.move(kLeftMotorDirection * leftTorque);
+    rightMotor.move(kRightMotorDirection * rightTorque);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
         Serial.print("CTRL=ON ");
@@ -232,9 +207,9 @@ void loop() {
         Serial.print(" wheel=");
         Serial.print(averageWheelVelocity);
         Serial.print(" cmdL=");
-        Serial.print(lastLeftTorqueCommand);
+        Serial.print(leftTorque);
         Serial.print(" cmdR=");
-        Serial.println(lastRightTorqueCommand);
+        Serial.println(rightTorque);
         lastTelemetryMs = nowMs;
     }
 }
