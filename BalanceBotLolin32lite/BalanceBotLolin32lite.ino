@@ -31,11 +31,15 @@ constexpr uint8_t kRcSteerPin = 35;
 constexpr bool kEnableRcReceiver = false;
 
 constexpr float kSupplyVoltage = 16.8f;
-constexpr float kMotorVoltageLimit = 8f;
+constexpr float kMotorVoltageLimit = 8.0f;
 
-// PID values
-constexpr float kBalanceAngleGain = 2.2f;
-constexpr float kPitchRateDampingGain = 0.56f;
+// --- PID tuning values ---
+constexpr float kP = 2.0f;   // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.1f;   // Integral:     corrects steady-state lean bias (start at 0, increase slowly)
+constexpr float kD = 0.56f;  // Derivative:   damping, reduces oscillation (uses pitch rate from gyro)
+// ---------------------------
+
+constexpr float kIntegralClamp = 1.0f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.10f;
 
 constexpr float kRcThrottleAngleGain = 0.15f;
@@ -46,8 +50,8 @@ constexpr float kMaxTorqueStepPerLoop = 0.05f;
 constexpr float kPitchFilterAlpha = 0.16f;
 constexpr unsigned long kTelemetryPeriodMs = 250UL;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
-constexpr float kLeftMotorDirection = -1.0f;
-constexpr float kRightMotorDirection = 1.0f;
+constexpr float kLeftMotorDirection = 1.0f;
+constexpr float kRightMotorDirection = -1.0f;
 
 TwoWire leftI2cBus = TwoWire(0);
 TwoWire rightI2cBus = TwoWire(1);
@@ -63,9 +67,11 @@ BLDCMotor rightMotor = BLDCMotor(kMotorPolePairs);
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRightPwmWPin, kRightEnablePin);
 
 float filteredPitchRadians = 0.0f;
+float pitchIntegral = 0.0f;
 float lastLeftTorqueCommand = 0.0f;
 float lastRightTorqueCommand = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
+unsigned long lastLoopMs = 0UL;
 
 float deadZone(float value) {
     return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
@@ -168,6 +174,7 @@ void setup() {
 
     const unsigned long nowMs = millis();
     lastTelemetryMs = nowMs;
+    lastLoopMs = nowMs;
 
     Serial.println("SimpleFOC motors ready.");
     Serial.println("Control starts immediately in always-armed test mode.");
@@ -182,16 +189,24 @@ void loop() {
     const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
     filteredPitchRadians += kPitchFilterAlpha * (pitchRadians - filteredPitchRadians);
 
+    const unsigned long nowMs = millis();
+    const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
+    lastLoopMs = nowMs;
+
     const float rcThrottle = kEnableRcReceiver ? readRcChannel(kRcThrottlePin) : 0.0f;
     const float rcSteer = kEnableRcReceiver ? readRcChannel(kRcSteerPin) : 0.0f;
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
     const float effectivePitch = filteredPitchRadians - targetPitchRadians;
     const float averageWheelVelocity = 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity);
-    const unsigned long nowMs = millis();
+
+    // Integral: accumulate error over time, clamped to prevent windup
+    pitchIntegral += deadZone(effectivePitch) * dtSeconds;
+    pitchIntegral = clampAbs(pitchIntegral, kIntegralClamp);
 
     const float balanceTorqueTarget =
-        (-kBalanceAngleGain * deadZone(effectivePitch))
-        - (kPitchRateDampingGain * pitchRateRadiansPerSecond)
+        (-kP * deadZone(effectivePitch))           // Proportional
+        - (kI * pitchIntegral)                     // Integral
+        - (kD * pitchRateRadiansPerSecond)          // Derivative
         - (kWheelVelocityDampingGain * averageWheelVelocity);
     const float steerTorque = rcSteer * kRcSteerTorqueGain;
 
@@ -212,6 +227,8 @@ void loop() {
         Serial.print(targetPitchRadians);
         Serial.print(" rate=");
         Serial.print(pitchRateRadiansPerSecond);
+        Serial.print(" integral=");
+        Serial.print(pitchIntegral);
         Serial.print(" wheel=");
         Serial.print(averageWheelVelocity);
         Serial.print(" cmdL=");
