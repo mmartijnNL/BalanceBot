@@ -75,6 +75,7 @@ class BLDCMotor {
     }
 
     float voltage_limit = 0.0f;
+    float voltage_sensor_align = 0.0f;
     MotionControlType controller = MotionControlType::torque;
     float last_move_command = 0.0f;
     float shaft_velocity = 0.0f;

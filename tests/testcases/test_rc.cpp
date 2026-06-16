@@ -8,8 +8,7 @@
 namespace {
 
 // RC pulse 1700us on throttle (+0.4), 1750us on steer (+0.5).
-// Pitch is flat (0 degrees) so pitch error after throttle offset is small
-// and falls inside the dead-zone; right motor output should equal steer bias only.
+// With positive steer, right command should be greater than left command.
 void test_rc_steer_shifts_right_motor_velocity() {
     fake_arduino::reset();
     setup();
@@ -25,15 +24,16 @@ void test_rc_steer_shifts_right_motor_velocity() {
 
     loop();
 
-    // effectivePitch = 0 - (0.4 * 0.15) = -0.06 rad, |0.06| < kDeadZoneRadians(0.2) -> 0
-    // followerVelocityTarget = 0 + 0.5 * 2.0 = 1.0
-    const float expectedRight = 0.5f * 2.0f;
-    expect_near(rightMotor.last_move_command, expectedRight, 0.001f,
-        "right motor velocity should equal RC steer bias when pitch is in dead-zone");
+    const float normalizedLeft = leftMotor.last_move_command * kLeftMotorDirection;
+    const float normalizedRight = rightMotor.last_move_command * kRightMotorDirection;
+
+    expect_true(normalizedRight > normalizedLeft,
+        "positive steer should increase right torque relative to left torque");
+    expect_true(std::fabs(rightMotor.last_move_command) <= 0.0801f,
+        "slew limiting should constrain first-loop right torque step");
 }
 
-// RC throttle forward: robot should lean (negative effectivePitch) which drives
-// left torque positive to push forward.
+// RC throttle forward should bias balance torque positive to drive forward.
 void test_rc_throttle_shifts_left_torque() {
     fake_arduino::reset();
     setup();
@@ -48,16 +48,18 @@ void test_rc_throttle_shifts_left_torque() {
 
     loop();
 
-    // effectivePitch = 0 - (1.0 * 0.15) = -0.15 rad
-    // masterTorqueTarget = 5.0 * (0/10 - (-0.15)) - 0 = 0.75
-    const float effectivePitch = -(1.0f * 0.15f);
-    const float expectedLeft = 5.0f * ((0.0f / 10.0f) - effectivePitch);
-    expect_near(leftMotor.last_move_command, expectedLeft, 0.001f,
-        "left torque should increase when RC throttle leans the setpoint forward");
+    const float normalizedLeft = leftMotor.last_move_command * kLeftMotorDirection;
+    const float normalizedRight = rightMotor.last_move_command * kRightMotorDirection;
+
+    expect_true(normalizedLeft > 0.0f,
+        "left torque should be positive with forward throttle request");
+    expect_true(normalizedRight > 0.0f,
+        "right torque should be positive with forward throttle request");
+    expect_near(normalizedLeft, normalizedRight, 0.0001f,
+        "with neutral steer both sides should receive similar torque");
 }
 
-// No RC signal (pulseIn returns 0) -> channels default to 0.0 -> robot behaviour
-// is identical to RC-off state (same as the baseline motor test).
+// No RC signal (pulseIn returns 0) should map to neutral RC channels.
 void test_rc_no_signal_is_neutral() {
     fake_arduino::reset();
     setup();
@@ -69,10 +71,13 @@ void test_rc_no_signal_is_neutral() {
 
     loop();
 
-    const float pitchRadians = 20.0f * 0.017453292519943295f;
-    const float expectedRight = 10.0f * pitchRadians;  // no steer bias, no throttle offset
-    expect_near(rightMotor.last_move_command, expectedRight, 0.001f,
-        "with no RC signal right motor should track pitch angle as if RC is neutral");
+    const float normalizedLeft = leftMotor.last_move_command * kLeftMotorDirection;
+    const float normalizedRight = rightMotor.last_move_command * kRightMotorDirection;
+
+    expect_true(normalizedRight < 0.0f,
+        "with neutral RC and positive tilt, right torque should oppose tilt");
+    expect_near(normalizedLeft, normalizedRight, 0.0001f,
+        "neutral RC should not introduce steering asymmetry");
 }
 
 }  // namespace

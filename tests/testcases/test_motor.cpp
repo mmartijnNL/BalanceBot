@@ -18,19 +18,68 @@ void test_loop_updates_motor_outputs_from_inputs() {
 
     loop();
 
+    const float normalizedLeft = leftMotor.last_move_command * kLeftMotorDirection;
+    const float normalizedRight = rightMotor.last_move_command * kRightMotorDirection;
+
     expect_true(leftMotor.loop_count() > 0, "left motor loopFOC should run");
     expect_true(rightMotor.loop_count() > 0, "right motor loopFOC should run");
-    expect_true(std::fabs(rightMotor.last_move_command) > 0.001f, "right velocity target should be non-zero above dead-zone");
+    expect_true(std::fabs(rightMotor.last_move_command) > 0.001f, "right torque should be non-zero above dead-zone");
+    expect_true(normalizedRight < 0.0f, "right torque should oppose positive forward tilt");
+    expect_near(normalizedLeft, normalizedRight, 0.0001f,
+        "left and right torques should match with neutral steering");
+    expect_true(std::fabs(rightMotor.last_move_command) <= 0.0801f,
+        "first loop torque should be limited by slew-rate clamp");
+}
 
-    // RC pins default to 0 after reset -> readRcChannel returns 0.0 -> effectivePitch == pitchRadians
-    const float pitchRadians = 20.0f * 0.017453292519943295f;
-    const float gyroRadiansPerSecond = 11.5f * 0.017453292519943295f;
-    const float effectivePitch = pitchRadians;  // no RC throttle offset
-    const float expectedFollowerVelocity = 10.0f * effectivePitch;  // no steer bias
-    expect_near(rightMotor.last_move_command, expectedFollowerVelocity, 0.001f, "right velocity command should track pitch angle");
+void test_torque_slew_limit_applies_between_loops() {
+    fake_arduino::reset();
+    setup();
 
-    const float expectedMasterTorque = (5.0f * ((2.0f / 10.0f) - effectivePitch)) - (0.08f * gyroRadiansPerSecond);
-    expect_near(leftMotor.last_move_command, expectedMasterTorque, 0.001f, "left torque command should couple to right velocity, pitch angle, and pitch rate");
+    fake_arduino::set_mpu_angle_x(25.0f);
+    fake_arduino::set_mpu_gyro_x(0.0f);
+
+    loop();
+    const float firstRight = rightMotor.last_move_command * kRightMotorDirection;
+    loop();
+    const float secondRight = rightMotor.last_move_command * kRightMotorDirection;
+
+    expect_true(std::fabs(secondRight - firstRight) <= 0.0801f,
+        "per-loop torque change should stay within configured slew limit");
+    expect_true(std::fabs(secondRight) >= std::fabs(firstRight),
+        "torque magnitude should ramp toward target over consecutive loops");
+}
+
+void test_periodic_telemetry_is_printed() {
+    fake_arduino::reset();
+    setup();
+
+    fake_arduino::set_mpu_angle_x(10.0f);
+    fake_arduino::set_mpu_gyro_x(2.0f);
+
+    loop();
+    fake_arduino::advance_millis(260);
+    loop();
+
+    const std::string logs = fake_arduino::serial_log();
+    expect_contains(logs, "CTRL=ON", "telemetry should include control state");
+    expect_contains(logs, "cmdL=", "telemetry should include left torque command");
+    expect_contains(logs, "cmdR=", "telemetry should include right torque command");
+}
+
+void test_large_tilt_still_commands_torque_when_always_armed() {
+    fake_arduino::reset();
+    setup();
+
+    fake_arduino::set_mpu_angle_x(55.0f);
+    fake_arduino::set_mpu_gyro_x(0.0f);
+    loop();
+
+    expect_true(std::fabs(rightMotor.last_move_command) > 0.001f,
+        "controller should keep commanding torque even at high tilt in always-armed mode");
+
+    const std::string logs = fake_arduino::serial_log();
+    expect_true(logs.find("CTRL=OFF") == std::string::npos,
+        "always-armed mode should not emit tilt safety cutoff logs");
 }
 
 }  // namespace

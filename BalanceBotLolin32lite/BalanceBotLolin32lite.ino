@@ -28,19 +28,25 @@ constexpr uint8_t kRightEnablePin = 12;
 
 constexpr uint8_t kRcThrottlePin = 34;
 constexpr uint8_t kRcSteerPin = 35;
+constexpr bool kEnableRcReceiver = false;
 
 constexpr float kSupplyVoltage = 16.8f;
-constexpr float kMotorVoltageLimit = 10.0f;
-constexpr float kBalanceAngleGain = 8.0f;
-constexpr float kPitchRateDampingGain = 0.20f;
-constexpr float kWheelVelocityDampingGain = 0.04f;
+constexpr float kMotorVoltageLimit = 3.2f;
+
+// PID values
+constexpr float kBalanceAngleGain = 3.8f;
+constexpr float kPitchRateDampingGain = 0.30f;
+constexpr float kWheelVelocityDampingGain = 0.07f;
+
 constexpr float kRcThrottleAngleGain = 0.15f;
 constexpr float kRcSteerTorqueGain = 1.6f;
 constexpr float kDeadZoneRadians = 0.05f;
-constexpr float kMaxTiltForDriveRadians = 0.75f;
-constexpr float kMaxTorqueCommand = 8.0f;
+constexpr float kMaxTorqueCommand = 2.4f;
+constexpr float kMaxTorqueStepPerLoop = 0.04f;
+constexpr float kPitchFilterAlpha = 0.10f;
+constexpr unsigned long kTelemetryPeriodMs = 250UL;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
-constexpr float kLeftMotorDirection = 1.0f;
+constexpr float kLeftMotorDirection = -1.0f;
 constexpr float kRightMotorDirection = 1.0f;
 
 TwoWire leftI2cBus = TwoWire(0);
@@ -56,6 +62,11 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmW
 BLDCMotor rightMotor = BLDCMotor(kMotorPolePairs);
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRightPwmWPin, kRightEnablePin);
 
+float filteredPitchRadians = 0.0f;
+float lastLeftTorqueCommand = 0.0f;
+float lastRightTorqueCommand = 0.0f;
+unsigned long lastTelemetryMs = 0UL;
+
 float deadZone(float value) {
     return (std::fabs(value) < kDeadZoneRadians) ? 0.0f : value;
 }
@@ -64,6 +75,13 @@ float clampAbs(float value, float limit) {
     if (value > limit) return limit;
     if (value < -limit) return -limit;
     return value;
+}
+
+float slewLimit(float target, float previous, float maxStep) {
+    const float delta = target - previous;
+    if (delta > maxStep) return previous + maxStep;
+    if (delta < -maxStep) return previous - maxStep;
+    return target;
 }
 
 float readRcChannel(uint8_t pin) {
@@ -100,8 +118,10 @@ void setup() {
     delay(250);
     Serial.println("\nBalanceBot SimpleFOC boot");
 
-    pinMode(kRcThrottlePin, INPUT);
-    pinMode(kRcSteerPin, INPUT);
+    if (kEnableRcReceiver) {
+        pinMode(kRcThrottlePin, INPUT);
+        pinMode(kRcSteerPin, INPUT);
+    }
 
     initializeI2cBuses();
 
@@ -141,7 +161,15 @@ void setup() {
     leftMotor.initFOC();
     rightMotor.initFOC();
 
+    filteredPitchRadians = 0.0f;
+    lastLeftTorqueCommand = 0.0f;
+    lastRightTorqueCommand = 0.0f;
+
+    const unsigned long nowMs = millis();
+    lastTelemetryMs = nowMs;
+
     Serial.println("SimpleFOC motors ready.");
+    Serial.println("Control starts immediately in always-armed test mode.");
 }
 
 void loop() {
@@ -151,18 +179,14 @@ void loop() {
     imu.update();
     const float pitchRadians = imu.getAngleX() * kDegreesToRadians;
     const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
+    filteredPitchRadians += kPitchFilterAlpha * (pitchRadians - filteredPitchRadians);
 
-    const float rcThrottle = readRcChannel(kRcThrottlePin);
-    const float rcSteer = readRcChannel(kRcSteerPin);
+    const float rcThrottle = kEnableRcReceiver ? readRcChannel(kRcThrottlePin) : 0.0f;
+    const float rcSteer = kEnableRcReceiver ? readRcChannel(kRcSteerPin) : 0.0f;
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
-    const float effectivePitch = pitchRadians - targetPitchRadians;
+    const float effectivePitch = filteredPitchRadians - targetPitchRadians;
     const float averageWheelVelocity = 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity);
-
-    if (std::fabs(effectivePitch) > kMaxTiltForDriveRadians) {
-        leftMotor.move(0.0f);
-        rightMotor.move(0.0f);
-        return;
-    }
+    const unsigned long nowMs = millis();
 
     const float balanceTorqueTarget =
         (-kBalanceAngleGain * deadZone(effectivePitch))
@@ -173,8 +197,28 @@ void loop() {
     const float leftTorque = clampAbs(balanceTorqueTarget - steerTorque, kMaxTorqueCommand);
     const float rightTorque = clampAbs(balanceTorqueTarget + steerTorque, kMaxTorqueCommand);
 
-    leftMotor.move(kLeftMotorDirection * leftTorque);
-    rightMotor.move(kRightMotorDirection * rightTorque);
+    lastLeftTorqueCommand = slewLimit(leftTorque, lastLeftTorqueCommand, kMaxTorqueStepPerLoop);
+    lastRightTorqueCommand = slewLimit(rightTorque, lastRightTorqueCommand, kMaxTorqueStepPerLoop);
+
+    leftMotor.move(kLeftMotorDirection * lastLeftTorqueCommand);
+    rightMotor.move(kRightMotorDirection * lastRightTorqueCommand);
+
+    if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
+        Serial.print("CTRL=ON ");
+        Serial.print("pitch=");
+        Serial.print(effectivePitch);
+        Serial.print(" target=");
+        Serial.print(targetPitchRadians);
+        Serial.print(" rate=");
+        Serial.print(pitchRateRadiansPerSecond);
+        Serial.print(" wheel=");
+        Serial.print(averageWheelVelocity);
+        Serial.print(" cmdL=");
+        Serial.print(lastLeftTorqueCommand);
+        Serial.print(" cmdR=");
+        Serial.println(lastRightTorqueCommand);
+        lastTelemetryMs = nowMs;
+    }
 }
 
 #endif // BALANCE_BOT_LOLIN32LITE_INO
