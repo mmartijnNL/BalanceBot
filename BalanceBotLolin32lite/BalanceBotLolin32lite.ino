@@ -31,19 +31,19 @@ constexpr uint8_t kRcSteerPin = 35;
 constexpr bool kEnableRcReceiver = false;
 
 constexpr float kSupplyVoltage = 16.8f;
-constexpr float kMotorVoltageLimit = 3.2f;
+constexpr float kMotorVoltageLimit = 8f;
 
 // PID values
-constexpr float kBalanceAngleGain = 3.8f;
-constexpr float kPitchRateDampingGain = 0.30f;
-constexpr float kWheelVelocityDampingGain = 0.07f;
+constexpr float kBalanceAngleGain = 2.2f;
+constexpr float kPitchRateDampingGain = 0.56f;
+constexpr float kWheelVelocityDampingGain = 0.10f;
 
 constexpr float kRcThrottleAngleGain = 0.15f;
 constexpr float kRcSteerTorqueGain = 1.6f;
-constexpr float kDeadZoneRadians = 0.05f;
-constexpr float kMaxTorqueCommand = 2.4f;
-constexpr float kMaxTorqueStepPerLoop = 0.04f;
-constexpr float kPitchFilterAlpha = 0.10f;
+constexpr float kDeadZoneRadians = 0.02f;
+constexpr float kMaxTorqueCommand = 3.2f;
+constexpr float kMaxTorqueStepPerLoop = 0.05f;
+constexpr float kPitchFilterAlpha = 0.16f;
 constexpr unsigned long kTelemetryPeriodMs = 250UL;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
 constexpr float kLeftMotorDirection = -1.0f;
@@ -161,7 +161,8 @@ void setup() {
     leftMotor.initFOC();
     rightMotor.initFOC();
 
-    filteredPitchRadians = 0.0f;
+    imu.update();
+    filteredPitchRadians = imu.getAngleX() * kDegreesToRadians;
     lastLeftTorqueCommand = 0.0f;
     lastRightTorqueCommand = 0.0f;
 
