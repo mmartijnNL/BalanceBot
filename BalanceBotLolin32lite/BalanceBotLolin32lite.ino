@@ -34,8 +34,8 @@ constexpr float kSupplyVoltage = 16.8f;
 constexpr float kMotorVoltageLimit = 8.0f;
 
 // --- PID tuning values ---
-constexpr float kP = 5.0f;   // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.1f;   // Integral:     corrects steady-state lean bias (start at 0, increase slowly)
+constexpr float kP = 3.0f;   // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.4f;   // Integral:     corrects steady-state lean bias (start at 0, increase slowly)
 constexpr float kD = 0.5f;  // Derivative:   damping, reduces oscillation (uses pitch rate from gyro)
 // ---------------------------
 
@@ -46,8 +46,8 @@ constexpr float kRcThrottleAngleGain = 0.15f;
 constexpr float kRcSteerTorqueGain = 1.6f;
 constexpr unsigned long kTelemetryPeriodMs = 250UL;
 constexpr float kDegreesToRadians = 0.017453292519943295f;
-constexpr float kLeftMotorDirection =   1.0f;
-constexpr float kRightMotorDirection =  -1.0f;
+constexpr float kLeftMotorDirection =   -1.0f;
+constexpr float kRightMotorDirection =  1.0f;
 
 TwoWire leftI2cBus = TwoWire(0);
 TwoWire rightI2cBus = TwoWire(1);
@@ -156,7 +156,6 @@ void setup() {
     lastLoopMs = nowMs;
 
     Serial.println("SimpleFOC motors ready.");
-    Serial.println("Control starts immediately in always-armed test mode.");
 }
 
 void loop() {
