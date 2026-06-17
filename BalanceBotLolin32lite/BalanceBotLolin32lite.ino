@@ -174,7 +174,6 @@ void loop() {
     const float rcSteer = kEnableRcReceiver ? readRcChannel(kRcSteerPin) : 0.0f;
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
     const float effectivePitch = pitchRadians - targetPitchRadians;
-    const float averageWheelVelocity = 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity);
 
     // Integral: accumulate error over time, clamped to prevent windup
     pitchIntegral += effectivePitch * dtSeconds;
@@ -184,7 +183,7 @@ void loop() {
         (-kP * effectivePitch)                     // Proportional
         - (kI * pitchIntegral)                     // Integral
         - (kD * pitchRateRadiansPerSecond)          // Derivative
-        - (kWheelVelocityDampingGain * averageWheelVelocity);
+        - (kWheelVelocityDampingGain * 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity));
     const float steerTorque = rcSteer * kRcSteerTorqueGain;
 
     const float leftTorque = balanceTorqueTarget - steerTorque;
@@ -203,8 +202,10 @@ void loop() {
         Serial.print(pitchRateRadiansPerSecond);
         Serial.print(" integral=");
         Serial.print(pitchIntegral);
-        Serial.print(" wheel=");
-        Serial.print(averageWheelVelocity);
+        Serial.print(" wheelL=");
+        Serial.print(leftMotor.shaft_velocity);
+        Serial.print(" wheelR=");
+        Serial.print(rightMotor.shaft_velocity);
         Serial.print(" cmdL=");
         Serial.print(leftTorque);
         Serial.print(" cmdR=");
