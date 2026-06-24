@@ -11,6 +11,6 @@ MPU6050 GY-521 6DOF IMU (3-axis accelerometer + gyroscope)
 2x 2804 BLDC hollow-shaft motor 
 2x AS5600 magnetic encoder set (FOC support)
 
-SimpleFOC Shield MKS Dual FOC V3.2
+2x Simple FOC mini
 
 LOLIN32 Lite (ESP32)

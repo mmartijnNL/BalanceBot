@@ -9,25 +9,25 @@
 
 namespace {
 
-constexpr uint8_t kLeftI2cSdaPin = 19;
-constexpr uint8_t kLeftI2cSclPin = 18;
-constexpr uint8_t kRightI2cSdaPin = 23;
-constexpr uint8_t kRightI2cSclPin = 5;
+constexpr uint8_t kLeftI2cSdaPin = 32;
+constexpr uint8_t kLeftI2cSclPin = 33;
+constexpr uint8_t kRightI2cSdaPin = 22;
+constexpr uint8_t kRightI2cSclPin = 19;
 
 constexpr int kMotorPolePairs = 7;
 
-constexpr uint8_t kLeftPwmUPin = 32;
-constexpr uint8_t kLeftPwmVPin = 33;
-constexpr uint8_t kLeftPwmWPin = 25;
-constexpr uint8_t kLeftEnablePin = 22;
+constexpr uint8_t kLeftPwmUPin = 25;
+constexpr uint8_t kLeftPwmVPin = 26;
+constexpr uint8_t kLeftPwmWPin = 27;
+constexpr uint8_t kLeftEnablePin = 14;
 
-constexpr uint8_t kRightPwmUPin = 26;
-constexpr uint8_t kRightPwmVPin = 27;
-constexpr uint8_t kRightPwmWPin = 14;
-constexpr uint8_t kRightEnablePin = 12;
+constexpr uint8_t kRightPwmUPin = 23;
+constexpr uint8_t kRightPwmVPin = 18;
+constexpr uint8_t kRightPwmWPin = 5;
+constexpr uint8_t kRightEnablePin = 17;
 
-constexpr uint8_t kRcThrottlePin = 34;
-constexpr uint8_t kRcSteerPin = 35;
+constexpr uint8_t kRcThrottlePin = 39;
+constexpr uint8_t kRcSteerPin = 36;
 constexpr bool kEnableRcReceiver = false;
 
 constexpr float kSupplyVoltage = 16.8f;
@@ -84,21 +84,6 @@ float readRcChannel(uint8_t pin) {
     return static_cast<float>(static_cast<long>(clamped) - static_cast<long>(kRcPulseCenter)) / 500.0f;
 }
 
-void initializeI2cBuses() {
-#if defined(ARDUINO_ARCH_ESP32)
-    leftI2cBus.begin(kLeftI2cSdaPin, kLeftI2cSclPin, 400000);
-    rightI2cBus.begin(kRightI2cSdaPin, kRightI2cSclPin, 400000);
-#else
-    leftI2cBus.setSDA(kLeftI2cSdaPin);
-    leftI2cBus.setSCL(kLeftI2cSclPin);
-    leftI2cBus.begin();
-
-    rightI2cBus.setSDA(kRightI2cSdaPin);
-    rightI2cBus.setSCL(kRightI2cSclPin);
-    rightI2cBus.begin();
-#endif
-}
-
 }  // namespace
 
 void setup() {
@@ -111,7 +96,8 @@ void setup() {
         pinMode(kRcSteerPin, INPUT);
     }
 
-    initializeI2cBuses();
+    leftI2cBus.begin(kLeftI2cSdaPin, kLeftI2cSclPin, 100000); 
+    rightI2cBus.begin(kRightI2cSdaPin, kRightI2cSclPin, 100000);
 
     const byte imuStatus = imu.begin();
     if (imuStatus != 0) {

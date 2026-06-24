@@ -11,18 +11,18 @@ The default supply voltage is 16.8V; adjust voltage_power_supply and voltage_lim
 #include <Arduino.h>
 #include <SimpleFOC.h>
 
-MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
+MagneticSensorI2C sensor0 = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C sensor1 = MagneticSensorI2C(AS5600_I2C);
-TwoWire I2Cone = TwoWire(0);
-TwoWire I2Ctwo = TwoWire(1);
+TwoWire I2C0 = TwoWire(0);
+TwoWire I2C1 = TwoWire(1);
 
-BLDCMotor motor = BLDCMotor(7);
-BLDCDriver3PWM driver = BLDCDriver3PWM(32, 33, 25, 22);
+BLDCMotor motor0 = BLDCMotor(7);
+BLDCDriver3PWM driver0 = BLDCDriver3PWM(23, 18, 5, 17);
 
 BLDCMotor motor1 = BLDCMotor(7);
-BLDCDriver3PWM driver1 = BLDCDriver3PWM(26, 27, 14, 12);
+BLDCDriver3PWM driver1 = BLDCDriver3PWM(25, 26, 27, 14);
 
-float target_velocity = 30;
+float target_velocity = 3; 
 
 const float kMaxTargetVelocity = 120.0f;
 const float kMinStableVelocity = 6.0f;
@@ -79,7 +79,7 @@ void applyPhaseTargets(unsigned long nowMs) {
       break;
   }
 
-  motor.move(motor0Target);
+  motor0.move(motor0Target);
   motor1.move(motor1Target);
 }
 
@@ -109,47 +109,47 @@ void handleSerialCommand() {
 }
 
 void setup() {
-  I2Cone.begin(19, 18, 400000);
-  I2Ctwo.begin(23, 5, 400000);
-  sensor.init(&I2Cone);
-  sensor1.init(&I2Ctwo);
+  I2C0.begin(22, 19, 400000);
+  I2C1.begin(32, 33, 400000);
+  sensor0.init(&I2C0);
+  sensor1.init(&I2C1);
 
-  motor.linkSensor(&sensor);
+  motor0.linkSensor(&sensor0);
   motor1.linkSensor(&sensor1);
 
-  driver.voltage_power_supply = 16.8;
-  driver.init();
+  driver0.voltage_power_supply = 16.8;
+  driver0.init();
 
   driver1.voltage_power_supply = 16.8;
   driver1.init();
 
-  motor.linkDriver(&driver);
+  motor0.linkDriver(&driver0);
   motor1.linkDriver(&driver1);
 
-  motor.controller = MotionControlType::velocity;
+  motor0.controller = MotionControlType::velocity;
   motor1.controller = MotionControlType::velocity;
 
-  motor.PID_velocity.P = 0.12;
+  motor0.PID_velocity.P = 0.12;
   motor1.PID_velocity.P = 0.12;
-  motor.PID_velocity.I = 1.2;
+  motor0.PID_velocity.I = 1.2;
   motor1.PID_velocity.I = 1.2;
-  motor.PID_velocity.D = 0;
+  motor0.PID_velocity.D = 0;
   motor1.PID_velocity.D = 0;
 
-  motor.voltage_limit = 10;
-  motor1.voltage_limit = 10;
+  motor0.voltage_limit = 6;                                 
+  motor1.voltage_limit = 6;
 
-  motor.LPF_velocity.Tf = 0.02;
+  motor0.LPF_velocity.Tf = 0.02;
   motor1.LPF_velocity.Tf = 0.02;
 
   Serial.begin(115200);
-  motor.useMonitoring(Serial);
+  motor0.useMonitoring(Serial);
   motor1.useMonitoring(Serial);
 
-  motor.init();
+  motor0.init();
   motor1.init();
 
-  motor.initFOC();
+  motor0.initFOC();
   motor1.initFOC();
 
   Serial.println("Motor ready.");
@@ -157,7 +157,7 @@ void setup() {
 }
 
 void loop() {
-  motor.loopFOC();
+  motor0.loopFOC();
   motor1.loopFOC();
 
   applyPhaseTargets(millis());
