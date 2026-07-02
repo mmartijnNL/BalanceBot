@@ -11,28 +11,30 @@ The default supply voltage is 16.8V; adjust voltage_power_supply and voltage_lim
 #include <Arduino.h>
 #include <SimpleFOC.h>
 
-MagneticSensorI2C sensor0 = MagneticSensorI2C(AS5600_I2C);
-MagneticSensorI2C sensor1 = MagneticSensorI2C(AS5600_I2C);
-TwoWire I2C0 = TwoWire(0);
-TwoWire I2C1 = TwoWire(1);
+MagneticSensorI2C sensorLeft = MagneticSensorI2C(AS5600_I2C);
+MagneticSensorI2C sensorRight = MagneticSensorI2C(AS5600_I2C);
+TwoWire i2cLeft = TwoWire(0);
+TwoWire i2cRight = TwoWire(1);
 
-BLDCMotor motor0 = BLDCMotor(7);
-BLDCDriver3PWM driver0 = BLDCDriver3PWM(23, 18, 5, 17);
+BLDCMotor motorLeft = BLDCMotor(7);
+BLDCDriver3PWM driverLeft = BLDCDriver3PWM(23, 18, 5, 17);
 
-BLDCMotor motor1 = BLDCMotor(7);
-BLDCDriver3PWM driver1 = BLDCDriver3PWM(25, 26, 27, 14);
+BLDCMotor motorRight = BLDCMotor(7);
+BLDCDriver3PWM driverRight = BLDCDriver3PWM(25, 26, 27, 14);
 
-float target_velocity = 3; 
+const bool kEnableMotorLeft = false;
+const bool kEnableMotorRight = true;
 
-const float kMaxTargetVelocity = 120.0f;
-const float kMinStableVelocity = 6.0f;
+float target_torque = 3; 
+
+const float kMaxTargetTorque = 120.0f;
 const unsigned long kPhaseDurationMs = 6000UL;
 
 enum class TestPhase : uint8_t {
-  kMotor0Forward,
-  kMotor0Backward,
-  kMotor1Forward,
-  kMotor1Backward,
+  MotorLeftForward,
+  MotorLeftBackward,
+  MotorRightForward,
+  MotorRightBackward,
 };
 
 float rampFactor(unsigned long phaseElapsedMs) {
@@ -49,38 +51,49 @@ float rampFactor(unsigned long phaseElapsedMs) {
 TestPhase activePhase(unsigned long nowMs) {
   const unsigned long cycleMs = kPhaseDurationMs * 4UL;
   const unsigned long phaseIndex = (nowMs % cycleMs) / kPhaseDurationMs;
-  return static_cast<TestPhase>(phaseIndex);
+  TestPhase phase = static_cast<TestPhase>(phaseIndex);
+  if(phase == TestPhase::MotorLeftForward && kEnableMotorLeft == false) phase = TestPhase::MotorRightForward;
+  if(phase == TestPhase::MotorLeftBackward && kEnableMotorLeft == false) phase = TestPhase::MotorRightBackward;
+  if(phase == TestPhase::MotorRightForward && kEnableMotorRight == false) phase = TestPhase::MotorLeftForward;
+  if(phase == TestPhase::MotorRightBackward && kEnableMotorRight == false) phase = TestPhase::MotorLeftBackward;
+  return phase;
 }
 
 void applyPhaseTargets(unsigned long nowMs) {
   const TestPhase phase = activePhase(nowMs);
   const unsigned long elapsed = nowMs % kPhaseDurationMs;
-  float speed = target_velocity * rampFactor(elapsed);
+  float speed = target_torque * rampFactor(elapsed);
 
-  if ((speed < kMinStableVelocity) && (speed > -kMinStableVelocity)) {
-    speed = 0.0f;
-  }
-
-  float motor0Target = 0.0f;
-  float motor1Target = 0.0f;
+  float motorLeftTarget = 0.0f;
+  float motorRightTarget = 0.0f;
 
   switch (phase) {
-    case TestPhase::kMotor0Forward:
-      motor0Target = speed;
+    case TestPhase::MotorLeftForward:
+      motorLeftTarget = speed;
       break;
-    case TestPhase::kMotor0Backward:
-      motor0Target = -speed;
+    case TestPhase::MotorLeftBackward:
+      motorLeftTarget = -speed;
       break;
-    case TestPhase::kMotor1Forward:
-      motor1Target = speed;
+    case TestPhase::MotorRightForward:
+      motorRightTarget = speed;
       break;
-    case TestPhase::kMotor1Backward:
-      motor1Target = -speed;
+    case TestPhase::MotorRightBackward:
+      motorRightTarget = -speed;
       break;
   }
 
-  motor0.move(motor0Target);
-  motor1.move(motor1Target);
+    Serial.println("");
+  if (kEnableMotorLeft) {
+    motorLeft.move(motorLeftTarget);
+    Serial.print(" Left: ");
+    Serial.print(motorLeftTarget);
+  }
+
+  if (kEnableMotorRight) {
+    motorRight.move(motorRightTarget);
+    Serial.print(" Right: ");
+    Serial.print(motorRightTarget);
+  }
 }
 
 void handleSerialCommand() {
@@ -95,70 +108,65 @@ void handleSerialCommand() {
   }
 
   if (cmd.charAt(0) == 'T') {
-    target_velocity = cmd.substring(1).toFloat();
-    if (target_velocity > kMaxTargetVelocity) {
-      target_velocity = kMaxTargetVelocity;
+    target_torque = cmd.substring(1).toFloat();
+    if (target_torque > kMaxTargetTorque) {
+      target_torque = kMaxTargetTorque;
     }
-    if (target_velocity < -kMaxTargetVelocity) {
-      target_velocity = -kMaxTargetVelocity;
+    if (target_torque < -kMaxTargetTorque) {
+      target_torque = -kMaxTargetTorque;
     }
-    Serial.print("Target velocity set to: ");
-    Serial.println(target_velocity);
+    Serial.print("Target torque set to: ");
+    Serial.println(target_torque);
   }
 #endif
 }
 
 void setup() {
-  I2C0.begin(22, 19, 400000);
-  I2C1.begin(32, 33, 400000);
-  sensor0.init(&I2C0);
-  sensor1.init(&I2C1);
+  i2cLeft.begin(22, 19, 400000);
+  i2cRight.begin(32, 33, 400000);
+  sensorLeft.init(&i2cLeft);
+  sensorRight.init(&i2cRight);
 
-  motor0.linkSensor(&sensor0);
-  motor1.linkSensor(&sensor1);
+  motorLeft.linkSensor(&sensorLeft);
+  motorRight.linkSensor(&sensorRight);
 
-  driver0.voltage_power_supply = 16.8;
-  driver0.init();
+  driverLeft.voltage_power_supply = 16.8;
+  driverLeft.init();
 
-  driver1.voltage_power_supply = 16.8;
-  driver1.init();
+  driverRight.voltage_power_supply = 16.8;
+  driverRight.init();
 
-  motor0.linkDriver(&driver0);
-  motor1.linkDriver(&driver1);
+  motorLeft.linkDriver(&driverLeft);
+  motorRight.linkDriver(&driverRight);
 
-  motor0.controller = MotionControlType::velocity;
-  motor1.controller = MotionControlType::velocity;
+  motorLeft.controller = MotionControlType::torque;
+  motorRight.controller = MotionControlType::torque;\
 
-  motor0.PID_velocity.P = 0.12;
-  motor1.PID_velocity.P = 0.12;
-  motor0.PID_velocity.I = 1.2;
-  motor1.PID_velocity.I = 1.2;
-  motor0.PID_velocity.D = 0;
-  motor1.PID_velocity.D = 0;
-
-  motor0.voltage_limit = 6;                                 
-  motor1.voltage_limit = 6;
-
-  motor0.LPF_velocity.Tf = 0.02;
-  motor1.LPF_velocity.Tf = 0.02;
+  motorLeft.voltage_limit = 8;                                 
+  motorRight.voltage_limit = 8;
 
   Serial.begin(115200);
-  motor0.useMonitoring(Serial);
-  motor1.useMonitoring(Serial);
+  motorLeft.useMonitoring(Serial);
+  motorRight.useMonitoring(Serial);
 
-  motor0.init();
-  motor1.init();
+  motorLeft.init();
+  motorRight.init();
 
-  motor0.initFOC();
-  motor1.initFOC();
+  motorLeft.initFOC();
+  motorRight.initFOC();
 
   Serial.println("Motor ready.");
-  Serial.println("Set target velocity in serial terminal, e.g. T10");
+  Serial.println("Set target torque in serial terminal, e.g. T10");
 }
 
 void loop() {
-  motor0.loopFOC();
-  motor1.loopFOC();
+  if (kEnableMotorLeft) {
+    motorLeft.loopFOC();
+  }
+
+  if (kEnableMotorRight) {
+    motorRight.loopFOC();
+  }
 
   applyPhaseTargets(millis());
 

@@ -9,25 +9,6 @@
 
 namespace {
 
-constexpr uint8_t kLeftI2cSdaPin = 32;
-constexpr uint8_t kLeftI2cSclPin = 33;
-constexpr uint8_t kRightI2cSdaPin = 22;
-constexpr uint8_t kRightI2cSclPin = 19;
-
-constexpr int kMotorPolePairs = 7;
-
-constexpr uint8_t kLeftPwmUPin = 25;
-constexpr uint8_t kLeftPwmVPin = 26;
-constexpr uint8_t kLeftPwmWPin = 27;
-constexpr uint8_t kLeftEnablePin = 14;
-
-constexpr uint8_t kRightPwmUPin = 23;
-constexpr uint8_t kRightPwmVPin = 18;
-constexpr uint8_t kRightPwmWPin = 5;
-constexpr uint8_t kRightEnablePin = 17;
-
-constexpr uint8_t kRcThrottlePin = 39;
-constexpr uint8_t kRcSteerPin = 36;
 constexpr bool kEnableRcReceiver = false;
 
 constexpr float kSupplyVoltage = 16.8f;
@@ -49,18 +30,18 @@ constexpr float kDegreesToRadians = 0.017453292519943295f;
 constexpr float kLeftMotorDirection =   -1.0f;
 constexpr float kRightMotorDirection =  1.0f;
 
-TwoWire leftI2cBus = TwoWire(0);
-TwoWire rightI2cBus = TwoWire(1);
+TwoWire i2cLeft = TwoWire(0);
+TwoWire i2cRight = TwoWire(1);
 
 MagneticSensorI2C leftSensor = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C rightSensor = MagneticSensorI2C(AS5600_I2C);
-MPU6050 imu = MPU6050(rightI2cBus);
+MPU6050 imu = MPU6050(i2cRight);
 
-BLDCMotor leftMotor = BLDCMotor(kMotorPolePairs);
-BLDCDriver3PWM leftDriver = BLDCDriver3PWM(kLeftPwmUPin, kLeftPwmVPin, kLeftPwmWPin, kLeftEnablePin);
+BLDCMotor leftMotor = BLDCMotor(7);     // 7 pole pairs
+BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 
-BLDCMotor rightMotor = BLDCMotor(kMotorPolePairs);
-BLDCDriver3PWM rightDriver = BLDCDriver3PWM(kRightPwmUPin, kRightPwmVPin, kRightPwmWPin, kRightEnablePin);
+BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
+BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
 float pitchIntegral = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
@@ -92,12 +73,12 @@ void setup() {
     Serial.println("\nBalanceBot SimpleFOC boot");
 
     if (kEnableRcReceiver) {
-        pinMode(kRcThrottlePin, INPUT);
-        pinMode(kRcSteerPin, INPUT);
+        pinMode(39, INPUT);
+        pinMode(36, INPUT);
     }
 
-    leftI2cBus.begin(kLeftI2cSdaPin, kLeftI2cSclPin, 100000); 
-    rightI2cBus.begin(kRightI2cSdaPin, kRightI2cSclPin, 100000);
+    i2cLeft.begin(22, 19, 100000); 
+    i2cRight.begin(32, 33, 100000);
 
     const byte imuStatus = imu.begin();
     if (imuStatus != 0) {
@@ -107,8 +88,8 @@ void setup() {
         imu.calcOffsets(true, true);
     }
 
-    leftSensor.init(&leftI2cBus);
-    rightSensor.init(&rightI2cBus);
+    leftSensor.init(&i2cLeft);
+    rightSensor.init(&i2cRight);
 
     leftMotor.linkSensor(&leftSensor);
     rightMotor.linkSensor(&rightSensor);
@@ -156,8 +137,8 @@ void loop() {
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
-    const float rcThrottle = kEnableRcReceiver ? readRcChannel(kRcThrottlePin) : 0.0f;
-    const float rcSteer = kEnableRcReceiver ? readRcChannel(kRcSteerPin) : 0.0f;
+    const float rcThrottle = kEnableRcReceiver ? readRcChannel(39) : 0.0f;
+    const float rcSteer = kEnableRcReceiver ? readRcChannel(36) : 0.0f;
     const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
     const float effectivePitch = pitchRadians - targetPitchRadians;
 
