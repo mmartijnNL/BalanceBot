@@ -22,7 +22,8 @@ BLDCDriver3PWM driverLeft = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor motorRight = BLDCMotor(7);
 BLDCDriver3PWM driverRight = BLDCDriver3PWM(25, 26, 27, 14);
 
-const bool kEnableMotorLeft = false;
+// Enable or disable motors for testing
+const bool kEnableMotorLeft = true;
 const bool kEnableMotorRight = true;
 
 float target_torque = 3; 
