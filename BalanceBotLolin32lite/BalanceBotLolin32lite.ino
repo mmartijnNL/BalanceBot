@@ -9,33 +9,35 @@
 
 namespace {
 
-constexpr bool kEnableRcReceiver = false;
 
-constexpr float kSupplyVoltage = 16.8f;
+constexpr float kSupplyVoltage = 16.8f;         // 4S LiPo: full=16.8 low=14
 constexpr float kMotorVoltageLimit = 8.0f;
+constexpr float kLeftMotorDirection =   1.0f;   // Reverse if needed
+constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
-// --- PID tuning values ---
-constexpr float kP = 3.0f;   // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.4f;   // Integral:     corrects steady-state lean bias (start at 0, increase slowly)
-constexpr float kD = 0.5f;  // Derivative:   damping, reduces oscillation (uses pitch rate from gyro)
-// ---------------------------
+// PID tuning values
+constexpr float kP = 3.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.0f;  // Integral: disabled during initial stabilization tuning
+constexpr float kD = 0.01f;  // Derivative: damping, reduces oscillation (uses pitch rate from gyro)
 
 constexpr float kIntegralClamp = 1.0f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.10f;
 
-constexpr float kRcThrottleAngleGain = 0.15f;
-constexpr float kRcSteerTorqueGain = 1.6f;
-constexpr unsigned long kTelemetryPeriodMs = 250UL;
-constexpr float kDegreesToRadians = 0.017453292519943295f;
-constexpr float kLeftMotorDirection =   -1.0f;
-constexpr float kRightMotorDirection =  1.0f;
+// Radio Control
+constexpr bool kEnableRcReceiver =      false;
+constexpr float kRcThrottleAngleGain =  0.15f;
+constexpr float kRcSteerTorqueGain =    1.6f;
+
+constexpr unsigned long kTelemetryPeriodMs = 100UL;
+constexpr float kDegreesToRadians =     0.017453292519943295f;
+constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
 
 TwoWire i2cLeft = TwoWire(0);
 TwoWire i2cRight = TwoWire(1);
 
 MagneticSensorI2C leftSensor = MagneticSensorI2C(AS5600_I2C);
 MagneticSensorI2C rightSensor = MagneticSensorI2C(AS5600_I2C);
-MPU6050 imu = MPU6050(i2cRight);
+MPU6050 imu = MPU6050(i2cLeft);
 
 BLDCMotor leftMotor = BLDCMotor(7);     // 7 pole pairs
 BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
@@ -43,6 +45,8 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
+float pitchZeroDegrees = 0.0f;
+float pitchZeroAccDegrees = 0.0f;
 float pitchIntegral = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
 unsigned long lastLoopMs = 0UL;
@@ -117,6 +121,8 @@ void setup() {
     rightMotor.initFOC();
 
     imu.update();
+    pitchZeroDegrees = imu.getAngleX();
+    pitchZeroAccDegrees = imu.getAccAngleX();
 
     const unsigned long nowMs = millis();
     lastTelemetryMs = nowMs;
@@ -130,7 +136,11 @@ void loop() {
     rightMotor.loopFOC();
 
     imu.update();
-    const float pitchRadians = imu.getAngleX() * kDegreesToRadians;
+    const float pitchFromGyroDegrees = imu.getAngleX() - pitchZeroDegrees;
+    const float pitchFromAccDegrees = imu.getAccAngleX() - pitchZeroAccDegrees;
+    const float pitchRadians =
+        (kPitchAngleBlend * pitchFromGyroDegrees + (1.0f - kPitchAngleBlend) * pitchFromAccDegrees)
+        * kDegreesToRadians;
     const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
 
     const unsigned long nowMs = millis();
@@ -160,10 +170,9 @@ void loop() {
     rightMotor.move(kRightMotorDirection * rightTorque);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
-        Serial.print("CTRL=ON ");
         Serial.print("pitch=");
         Serial.print(effectivePitch);
-        Serial.print(" target=");
+        Serial.print(" targetPitch=");
         Serial.print(targetPitchRadians);
         Serial.print(" rate=");
         Serial.print(pitchRateRadiansPerSecond);
@@ -176,7 +185,21 @@ void loop() {
         Serial.print(" cmdL=");
         Serial.print(leftTorque);
         Serial.print(" cmdR=");
-        Serial.println(rightTorque);
+        Serial.print(rightTorque);
+        Serial.print(" imu X=");
+        Serial.print(imu.getAngleX());
+        Serial.print(" Y=");
+        Serial.print(imu.getAngleY());
+        Serial.print(" Z=");
+        Serial.print(imu.getAngleZ());
+        Serial.print(" accX=");
+        Serial.print(imu.getAccX());
+        Serial.print(" accY=");
+        Serial.print(imu.getAccY());
+        Serial.print(" accZ=");
+        Serial.print(imu.getAccZ());
+
+        Serial.println("");
         lastTelemetryMs = nowMs;
     }
 }
