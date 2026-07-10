@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <SimpleFOC.h>
 #include <MPU6050_light.h>
 #include <Wire.h>
 #include <cmath>
@@ -12,9 +11,6 @@ constexpr unsigned long kTelemetryPeriodMs = 100UL;
 TwoWire i2cLeft = TwoWire(0);
 
 MPU6050 imu = MPU6050(i2cLeft);
-
-unsigned long lastTelemetryMs = 0UL;
-unsigned long lastLoopMs = 0UL;
 
 
 }  // namespace
@@ -38,25 +34,17 @@ void setup() {
 
     imu.update();
 
-    const unsigned long nowMs = millis();
-
     Serial.println("Initialized.");
 }
 
 void loop() {
-    static unsigned long lastLoopMs = 0;
     static unsigned long lastTelemetryMs = 0;
 
     imu.update();
 
-    //float angle = imu.getAngleX();
-
     float angle = atan2(imu.getAccY(), imu.getAccZ()) * (180.0 / PI);
 
     const unsigned long nowMs = millis();
-    const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
-    lastLoopMs = nowMs;
-
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
         Serial.print(angle);
         Serial.print("\t");

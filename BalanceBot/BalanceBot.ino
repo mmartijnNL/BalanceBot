@@ -2,11 +2,9 @@
 #include <SimpleFOC.h>
 #include <MPU6050_light.h>
 #include <Wire.h>
-#include <cmath>
 
 namespace {
 
-constexpr bool kLeftMotorReverse =   true;   // Reverse if needed
 constexpr bool kRightMotorReverse =  false;  // Reverse if needed
 
 // PID tuning values
@@ -29,11 +27,6 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
-float pitchZeroDegrees = 0.0f;
-float pitchZeroAccDegrees = 0.0f;
-float pitchIntegral = 0.0f;
-unsigned long lastTelemetryMs = 0UL;
-unsigned long lastLoopMs = 0UL;
 float initialOffset = 0;
 
 
@@ -90,8 +83,6 @@ void setup() {
 
     initialOffset = imu.getAngleY();
 
-    const unsigned long nowMs = millis();
-
     Serial.println("Initialized.");
 }
 
@@ -125,7 +116,6 @@ void loop() {
     lastError = error;
     float pidResult = (kP * error) + (kI * integral) + (kD * derivative);
 
-    //leftMotor.move(kLeftMotorReverse ? -pidResult : pidResult);
     rightMotor.move(kRightMotorReverse ? -pidResult : pidResult);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
