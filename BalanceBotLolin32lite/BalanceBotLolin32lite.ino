@@ -16,9 +16,9 @@ constexpr float kLeftMotorDirection =   1.0f;   // Reverse if needed
 constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // PID tuning values
-constexpr float kP = 3.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.0f;  // Integral: disabled during initial stabilization tuning
-constexpr float kD = 0.01f;  // Derivative: damping, reduces oscillation (uses pitch rate from gyro)
+constexpr float kP = 5.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.0f;  // Integral: 
+constexpr float kD = 0.001f;  // Derivative: damping, reduces oscillation
 
 constexpr float kIntegralClamp = 1.0f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.10f;
@@ -28,7 +28,13 @@ constexpr bool kEnableRcReceiver =      false;
 constexpr float kRcThrottleAngleGain =  0.15f;
 constexpr float kRcSteerTorqueGain =    1.6f;
 
+constexpr float kTargetSlewRate = 10.0f;      // Max torque change per second (smoothing)
+constexpr float kZeroDeadband = 0.12f;        // Ignore tiny commands that cause chatter
+constexpr float kOutputFilterAlpha = 0.25f;   // EMA smoothing factor: lower = smoother (0.0–1.0)
+
 constexpr unsigned long kTelemetryPeriodMs = 100UL;
+constexpr unsigned long kStartupTargetCalibrationMs = 1500UL;
+constexpr unsigned long kStartupCalibrationSampleDelayMs = 5UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
 constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
 
@@ -45,8 +51,12 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
+float gLeftTorqueSmoothed = 0.0f;
+float gRightTorqueSmoothed = 0.0f;
+
 float pitchZeroDegrees = 0.0f;
 float pitchZeroAccDegrees = 0.0f;
+float startupTargetPitchRadians = 0.0f;
 float pitchIntegral = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
 unsigned long lastLoopMs = 0UL;
@@ -55,6 +65,20 @@ float clampAbs(float value, float limit) {
     if (value > limit) return limit;
     if (value < -limit) return -limit;
     return value;
+}
+
+float slewToward(float current, float target, float maxDelta) {
+    const float delta = target - current;
+    if (delta > maxDelta) return current + maxDelta;
+    if (delta < -maxDelta) return current - maxDelta;
+    return target;
+}
+
+float wrappedAngleErrorRadians(float angleRadians, float referenceRadians) {
+    float error = angleRadians - referenceRadians;
+    while (error > PI) error -= 2.0f * PI;
+    while (error < -PI) error += 2.0f * PI;
+    return error;
 }
 
 float readRcChannel(uint8_t pin) {
@@ -124,6 +148,27 @@ void setup() {
     pitchZeroDegrees = imu.getAngleX();
     pitchZeroAccDegrees = imu.getAccAngleX();
 
+    Serial.println("Hold bot at desired start pitch... calibrating target.");
+    float pitchSumRadians = 0.0f;
+    unsigned long sampleCount = 0UL;
+    const unsigned long calibrationStartMs = millis();
+    while ((millis() - calibrationStartMs) < kStartupTargetCalibrationMs) {
+        imu.update();
+        const float pitchFromGyroDegrees = imu.getAngleX() - pitchZeroDegrees;
+        const float pitchFromAccDegrees = imu.getAccAngleX() - pitchZeroAccDegrees;
+        const float blendedPitchRadians =
+            (kPitchAngleBlend * pitchFromGyroDegrees + (1.0f - kPitchAngleBlend) * pitchFromAccDegrees)
+            * kDegreesToRadians;
+        pitchSumRadians += blendedPitchRadians;
+        ++sampleCount;
+        delay(kStartupCalibrationSampleDelayMs);
+    }
+    if (sampleCount > 0UL) {
+        startupTargetPitchRadians = pitchSumRadians / static_cast<float>(sampleCount);
+    }
+    Serial.print("Startup target pitch rad=");
+    Serial.println(startupTargetPitchRadians, 6);
+
     const unsigned long nowMs = millis();
     lastTelemetryMs = nowMs;
     lastLoopMs = nowMs;
@@ -149,8 +194,8 @@ void loop() {
 
     const float rcThrottle = kEnableRcReceiver ? readRcChannel(39) : 0.0f;
     const float rcSteer = kEnableRcReceiver ? readRcChannel(36) : 0.0f;
-    const float targetPitchRadians = rcThrottle * kRcThrottleAngleGain;
-    const float effectivePitch = pitchRadians - targetPitchRadians;
+    const float targetPitchRadians = startupTargetPitchRadians + (rcThrottle * kRcThrottleAngleGain);
+    const float effectivePitch = wrappedAngleErrorRadians(pitchRadians, targetPitchRadians);
 
     // Integral: accumulate error over time, clamped to prevent windup
     pitchIntegral += effectivePitch * dtSeconds;
@@ -163,11 +208,20 @@ void loop() {
         - (kWheelVelocityDampingGain * 0.5f * (leftMotor.shaft_velocity + rightMotor.shaft_velocity));
     const float steerTorque = rcSteer * kRcSteerTorqueGain;
 
-    const float leftTorque = balanceTorqueTarget - steerTorque;
-    const float rightTorque = balanceTorqueTarget + steerTorque;
+    float leftTorque = balanceTorqueTarget - steerTorque;
+    float rightTorque = balanceTorqueTarget + steerTorque;
 
-    leftMotor.move(kLeftMotorDirection * leftTorque);
-    rightMotor.move(kRightMotorDirection * rightTorque);
+    if (fabsf(leftTorque) < kZeroDeadband) leftTorque = 0.0f;
+    if (fabsf(rightTorque) < kZeroDeadband) rightTorque = 0.0f;
+
+    const float maxDelta = kTargetSlewRate * dtSeconds;
+    const float leftSlewed = slewToward(gLeftTorqueSmoothed, kLeftMotorDirection * leftTorque, maxDelta);
+    const float rightSlewed = slewToward(gRightTorqueSmoothed, kRightMotorDirection * rightTorque, maxDelta);
+    gLeftTorqueSmoothed  = gLeftTorqueSmoothed  + kOutputFilterAlpha * (leftSlewed  - gLeftTorqueSmoothed);
+    gRightTorqueSmoothed = gRightTorqueSmoothed + kOutputFilterAlpha * (rightSlewed - gRightTorqueSmoothed);
+
+    leftMotor.move(gLeftTorqueSmoothed);
+    rightMotor.move(gRightTorqueSmoothed);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
         Serial.print("pitch=");

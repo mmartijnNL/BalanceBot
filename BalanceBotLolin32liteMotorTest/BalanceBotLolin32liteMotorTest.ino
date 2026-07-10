@@ -30,6 +30,14 @@ float target_torque = 3;
 
 const float kMaxTargetTorque = 120.0f;
 const unsigned long kPhaseDurationMs = 6000UL;
+const float kTargetSlewRate = 40.0f;  // Max target change per second.
+const float kZeroDeadband = 0.12f;    // Ignore tiny commands that cause chatter.
+const unsigned long kLogIntervalMs = 100UL;
+
+float gMotorLeftTargetSmoothed = 0.0f;
+float gMotorRightTargetSmoothed = 0.0f;
+unsigned long gLastApplyMs = 0;
+unsigned long gLastLogMs = 0;
 
 enum class TestPhase : uint8_t {
   MotorLeftForward,
@@ -60,40 +68,68 @@ TestPhase activePhase(unsigned long nowMs) {
   return phase;
 }
 
+float slewToward(float current, float target, float maxDelta) {
+  const float delta = target - current;
+  if (delta > maxDelta) {
+    return current + maxDelta;
+  }
+  if (delta < -maxDelta) {
+    return current - maxDelta;
+  }
+  return target;
+}
+
 void applyPhaseTargets(unsigned long nowMs) {
   const TestPhase phase = activePhase(nowMs);
   const unsigned long elapsed = nowMs % kPhaseDurationMs;
-  float speed = target_torque * rampFactor(elapsed);
+  const float speed = target_torque * rampFactor(elapsed);
 
-  float motorLeftTarget = 0.0f;
-  float motorRightTarget = 0.0f;
+  const unsigned long dtMs = (gLastApplyMs == 0) ? 0 : (nowMs - gLastApplyMs);
+  gLastApplyMs = nowMs;
+  const float maxDelta = kTargetSlewRate * (static_cast<float>(dtMs) / 1000.0f);
+
+  float motorLeftTargetDesired = 0.0f;
+  float motorRightTargetDesired = 0.0f;
 
   switch (phase) {
     case TestPhase::MotorLeftForward:
-      motorLeftTarget = speed;
+      motorLeftTargetDesired = speed;
       break;
     case TestPhase::MotorLeftBackward:
-      motorLeftTarget = -speed;
+      motorLeftTargetDesired = -speed;
       break;
     case TestPhase::MotorRightForward:
-      motorRightTarget = speed;
+      motorRightTargetDesired = speed;
       break;
     case TestPhase::MotorRightBackward:
-      motorRightTarget = -speed;
+      motorRightTargetDesired = -speed;
       break;
   }
 
-    Serial.println("");
+  if (fabsf(motorLeftTargetDesired) < kZeroDeadband) {
+    motorLeftTargetDesired = 0.0f;
+  }
+  if (fabsf(motorRightTargetDesired) < kZeroDeadband) {
+    motorRightTargetDesired = 0.0f;
+  }
+
+  gMotorLeftTargetSmoothed = slewToward(gMotorLeftTargetSmoothed, motorLeftTargetDesired, maxDelta);
+  gMotorRightTargetSmoothed = slewToward(gMotorRightTargetSmoothed, motorRightTargetDesired, maxDelta);
+
   if (kEnableMotorLeft) {
-    motorLeft.move(motorLeftTarget);
-    Serial.print(" Left: ");
-    Serial.print(motorLeftTarget);
+    motorLeft.move(gMotorLeftTargetSmoothed);
   }
 
   if (kEnableMotorRight) {
-    motorRight.move(motorRightTarget);
+    motorRight.move(gMotorRightTargetSmoothed);
+  }
+
+  if (nowMs - gLastLogMs >= kLogIntervalMs) {
+    gLastLogMs = nowMs;
+    Serial.print("Left: ");
+    Serial.print(gMotorLeftTargetSmoothed, 3);
     Serial.print(" Right: ");
-    Serial.print(motorRightTarget);
+    Serial.println(gMotorRightTargetSmoothed, 3);
   }
 }
 
@@ -141,7 +177,7 @@ void setup() {
   motorRight.linkDriver(&driverRight);
 
   motorLeft.controller = MotionControlType::torque;
-  motorRight.controller = MotionControlType::torque;\
+  motorRight.controller = MotionControlType::torque;
 
   motorLeft.voltage_limit = 8;                                 
   motorRight.voltage_limit = 8;
