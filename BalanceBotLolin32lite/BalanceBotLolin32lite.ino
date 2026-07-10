@@ -16,11 +16,11 @@ constexpr float kLeftMotorDirection =   1.0f;   // Reverse if needed
 constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // PID tuning values
-constexpr float kP = 5.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.0f;  // Integral: 
-constexpr float kD = 0.001f;  // Derivative: damping, reduces oscillation
+constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.3f;  // Integral: corrects steady-state lean / drift
+constexpr float kD = 0.05f;  // Derivative: damping, reduces oscillation
 
-constexpr float kIntegralClamp = 1.0f;       // Anti-windup: max magnitude of the integral term
+constexpr float kIntegralClamp = 2.0f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.10f;
 
 // Radio Control
@@ -28,9 +28,7 @@ constexpr bool kEnableRcReceiver =      false;
 constexpr float kRcThrottleAngleGain =  0.15f;
 constexpr float kRcSteerTorqueGain =    1.6f;
 
-constexpr float kTargetSlewRate = 10.0f;      // Max torque change per second (smoothing)
 constexpr float kZeroDeadband = 0.12f;        // Ignore tiny commands that cause chatter
-constexpr float kOutputFilterAlpha = 0.25f;   // EMA smoothing factor: lower = smoother (0.0–1.0)
 
 constexpr unsigned long kTelemetryPeriodMs = 100UL;
 constexpr unsigned long kStartupTargetCalibrationMs = 1500UL;
@@ -51,9 +49,6 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
-float gLeftTorqueSmoothed = 0.0f;
-float gRightTorqueSmoothed = 0.0f;
-
 float pitchZeroDegrees = 0.0f;
 float pitchZeroAccDegrees = 0.0f;
 float startupTargetPitchRadians = 0.0f;
@@ -65,13 +60,6 @@ float clampAbs(float value, float limit) {
     if (value > limit) return limit;
     if (value < -limit) return -limit;
     return value;
-}
-
-float slewToward(float current, float target, float maxDelta) {
-    const float delta = target - current;
-    if (delta > maxDelta) return current + maxDelta;
-    if (delta < -maxDelta) return current - maxDelta;
-    return target;
 }
 
 float wrappedAngleErrorRadians(float angleRadians, float referenceRadians) {
@@ -214,14 +202,8 @@ void loop() {
     if (fabsf(leftTorque) < kZeroDeadband) leftTorque = 0.0f;
     if (fabsf(rightTorque) < kZeroDeadband) rightTorque = 0.0f;
 
-    const float maxDelta = kTargetSlewRate * dtSeconds;
-    const float leftSlewed = slewToward(gLeftTorqueSmoothed, kLeftMotorDirection * leftTorque, maxDelta);
-    const float rightSlewed = slewToward(gRightTorqueSmoothed, kRightMotorDirection * rightTorque, maxDelta);
-    gLeftTorqueSmoothed  = gLeftTorqueSmoothed  + kOutputFilterAlpha * (leftSlewed  - gLeftTorqueSmoothed);
-    gRightTorqueSmoothed = gRightTorqueSmoothed + kOutputFilterAlpha * (rightSlewed - gRightTorqueSmoothed);
-
-    leftMotor.move(gLeftTorqueSmoothed);
-    rightMotor.move(gRightTorqueSmoothed);
+    leftMotor.move(kLeftMotorDirection * leftTorque);
+    rightMotor.move(kRightMotorDirection * rightTorque);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
         Serial.print("pitch=");
