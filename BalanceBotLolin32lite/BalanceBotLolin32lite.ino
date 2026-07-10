@@ -16,15 +16,15 @@ constexpr float kLeftMotorDirection =   1.0f;   // Reverse if needed
 constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // PID tuning values
-constexpr float kP = 13.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.20f;  // Integral: corrects steady-state lean / drift
-constexpr float kD = 0.08f;  // Derivative: damping, reduces oscillation
+constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.1f;  // Integral: corrects steady-state lean / drift
+constexpr float kD = 0.1f;  // Derivative: damping, reduces oscillation
 
 constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.06f;
 
 // Radio Control
-constexpr bool kEnableRcReceiver =      false;
+bool kEnableRcReceiver = false;
 constexpr float kRcThrottleAngleGain =  0.15f;
 constexpr float kRcSteerTorqueGain =    1.6f;
 
@@ -95,10 +95,9 @@ void setup() {
     delay(250);
     Serial.println("\nBalanceBot SimpleFOC boot");
 
-    if (kEnableRcReceiver) {
-        pinMode(39, INPUT);
-        pinMode(36, INPUT);
-    }
+    pinMode(39, INPUT);
+    pinMode(36, INPUT);
+
 
     i2cLeft.begin(22, 19, 100000); 
     i2cRight.begin(32, 33, 100000);
@@ -169,6 +168,12 @@ void loop() {
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
+    if(!kEnableRcReceiver && readRcChannel(39) > 0.3f)\
+    {
+        kEnableRcReceiver = true;
+        Serial.println("Enabling RC control");
+    }
+
     const float rcThrottle = kEnableRcReceiver ? readRcChannel(39) : 0.0f;
     const float rcSteer = kEnableRcReceiver ? readRcChannel(36) : 0.0f;
     const float targetPitchRadians = startupPitchReferenceRadians + (rcThrottle * kRcThrottleAngleGain);
@@ -213,22 +218,10 @@ void loop() {
         Serial.print(rightMotor.shaft_velocity);
         Serial.print(" wheelFwd=");
         Serial.print(averageWheelVelocityForward);
-        Serial.print(" cmdL=");
-        Serial.print(leftTorque);
-        Serial.print(" cmdR=");
-        Serial.print(rightTorque);
-        Serial.print(" imu X=");
-        Serial.print(imu.getAngleX());
-        Serial.print(" Y=");
-        Serial.print(imu.getAngleY());
-        Serial.print(" Z=");
-        Serial.print(imu.getAngleZ());
-        Serial.print(" accX=");
-        Serial.print(imu.getAccX());
-        Serial.print(" accY=");
-        Serial.print(imu.getAccY());
-        Serial.print(" accZ=");
-        Serial.print(imu.getAccZ());
+        Serial.print(" rcThrottle=");
+        Serial.print(readRcChannel(39));
+        Serial.print(" rcSteer=");
+        Serial.print(readRcChannel(36));
 
         Serial.println("");
         lastTelemetryMs = nowMs;
