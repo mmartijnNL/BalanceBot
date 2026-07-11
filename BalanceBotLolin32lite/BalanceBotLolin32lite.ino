@@ -11,9 +11,9 @@
 namespace {
 
 // PID tuning values
-constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.001f;  // Integral: corrects steady-state lean / drift
-constexpr float kD = 0.1f;  // Derivative: damping, reduces oscillation
+constexpr float kP = 9.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.0f;  // Integral: corrects steady-state lean / drift
+constexpr float kD = 0.02f;  // Derivative: damping, reduces oscillation
 
 constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.06f;
@@ -135,7 +135,8 @@ void emitTelemetry(unsigned long nowMs,
     const int n = snprintf(
         telemetryLine,
         sizeof(telemetryLine),
-        "pitch: %.3f rad, target_pitch: %.3f rad, pitch_rate: %.3f rad/s, pitch_integral: %.3f, wheel_fwd: %.3f rad/s, rc_throttle: %.2f, rc_steer: %.2f\n",
+        // Keep each line compact so it fits typical UART TX buffers without blocking.
+        "p:%.3f,tp:%.3f,pr:%.3f,pi:%.3f,w:%.3f,rt:%.2f,rs:%.2f\n",
         static_cast<double>(effectivePitch),
         static_cast<double>(targetPitchRadians),
         static_cast<double>(pitchRateRadiansPerSecond),
@@ -146,7 +147,9 @@ void emitTelemetry(unsigned long nowMs,
 
     if (n > 0 && n < static_cast<int>(sizeof(telemetryLine))) {
         // Skip rather than block: motor loop timing is more important than telemetry.
-        if (Serial.availableForWrite() < n) return;
+        const int available = Serial.availableForWrite();
+        if (available <= 0) return;
+        if (available < n) return;
         Serial.write(reinterpret_cast<const uint8_t*>(telemetryLine), static_cast<size_t>(n));
         lastTelemetryMs = nowMs;
     }
