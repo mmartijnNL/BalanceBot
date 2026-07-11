@@ -12,8 +12,8 @@ namespace {
 
 // PID tuning values
 constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.0f;  // Integral: corrects steady-state lean / drift
-constexpr float kD = 0.01f;  // Derivative: damping, reduces oscillation
+constexpr float kI = 0.001f;  // Integral: corrects steady-state lean / drift
+constexpr float kD = 0.1f;  // Derivative: damping, reduces oscillation
 
 constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.06f;
@@ -25,8 +25,8 @@ constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // Radio Control
 bool kEnableRcReceiver = false;
-constexpr float kRcThrottleAngleGain =  0.15f;
-constexpr float kRcSteerTorqueGain =    1.6f;
+constexpr float kRcThrottleAngleGain =  1.0f;
+constexpr float kRcSteerTorqueGain =    1.0f;
 
 constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
 
@@ -67,13 +67,42 @@ float wrappedAngleErrorRadians(float angleRadians, float referenceRadians) {
     return error;
 }
 
-float readRcChannel(uint8_t pin) {
+// RC receiver state — written in ISRs, read in loop()
+volatile unsigned long rcThrottleRiseUs = 0UL;
+volatile unsigned long rcThrottlePulseUs = 1500UL;
+volatile unsigned long rcThrottleLastUpdateUs = 0UL;
+volatile unsigned long rcSteerRiseUs = 0UL;
+volatile unsigned long rcSteerPulseUs = 1500UL;
+volatile unsigned long rcSteerLastUpdateUs = 0UL;
+
+void IRAM_ATTR onRcThrottleChange() {
+    const unsigned long now = micros();
+    if (digitalRead(39) == HIGH) {
+        rcThrottleRiseUs = now;
+    } else if (rcThrottleRiseUs != 0UL) {
+        rcThrottlePulseUs = now - rcThrottleRiseUs;
+        rcThrottleLastUpdateUs = now;
+    }
+}
+
+void IRAM_ATTR onRcSteerChange() {
+    const unsigned long now = micros();
+    if (digitalRead(36) == HIGH) {
+        rcSteerRiseUs = now;
+    } else if (rcSteerRiseUs != 0UL) {
+        rcSteerPulseUs = now - rcSteerRiseUs;
+        rcSteerLastUpdateUs = now;
+    }
+}
+
+// Non-blocking RC read — returns 0 if signal is stale (>100 ms)
+float getRcChannel(volatile unsigned long& pulseUs, volatile unsigned long& lastUpdateUs) {
     constexpr unsigned long kRcPulseMin = 1000UL;
     constexpr unsigned long kRcPulseMax = 2000UL;
     constexpr unsigned long kRcPulseCenter = 1500UL;
-    constexpr unsigned long kRcTimeout = 25000UL;
-    const unsigned long pulse = pulseIn(pin, HIGH, kRcTimeout);
-    if (pulse == 0) return 0.0f;
+    constexpr unsigned long kRcSignalTimeout = 100000UL;  // 100 ms
+    if ((micros() - lastUpdateUs) > kRcSignalTimeout) return 0.0f;
+    const unsigned long pulse = pulseUs;
     const unsigned long clamped = (pulse < kRcPulseMin) ? kRcPulseMin
         : (pulse > kRcPulseMax ? kRcPulseMax : pulse);
     return static_cast<float>(static_cast<long>(clamped) - static_cast<long>(kRcPulseCenter)) / 500.0f;
@@ -132,6 +161,8 @@ void setup() {
 
     pinMode(39, INPUT);
     pinMode(36, INPUT);
+    attachInterrupt(digitalPinToInterrupt(39), onRcThrottleChange, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(36), onRcSteerChange, CHANGE);
 
     i2cLeft.begin(22, 19, 100000); 
     i2cRight.begin(32, 33, 100000);
@@ -203,8 +234,8 @@ void loop() {
     lastLoopMs = nowMs;
 
 
-    const float rcThrottle = 0.0f; // readRcChannel(39);
-    const float rcSteer = 0.0f; // readRcChannel(36);
+    const float rcThrottle = getRcChannel(rcThrottlePulseUs, rcThrottleLastUpdateUs);
+    const float rcSteer    = getRcChannel(rcSteerPulseUs,    rcSteerLastUpdateUs);
 
     if(!kEnableRcReceiver && (rcThrottle > 0.3f || rcSteer > 0.3f || rcSteer < -0.3f))
     {
