@@ -6,11 +6,12 @@
 #include <MPU6050_light.h>
 #include <Wire.h>
 #include <cmath>
+#include <cstdio>
 
 namespace {
 
 // PID tuning values
-constexpr float kP = 4.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
 constexpr float kI = 0.0f;  // Integral: corrects steady-state lean / drift
 constexpr float kD = 0.01f;  // Derivative: damping, reduces oscillation
 
@@ -29,7 +30,9 @@ constexpr float kRcSteerTorqueGain =    1.6f;
 
 constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
 
-constexpr unsigned long kTelemetryPeriodMs = 10UL;
+constexpr bool kEnableTelemetry = true;
+constexpr unsigned long kTelemetryPeriodMs = 50UL;
+constexpr unsigned long kSerialBaudRate = 460800UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
 constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
 
@@ -76,7 +79,6 @@ float readRcChannel(uint8_t pin) {
     return static_cast<float>(static_cast<long>(clamped) - static_cast<long>(kRcPulseCenter)) / 500.0f;
 }
 
-
 float getPitchRadians(){
     imu.update();
     const float pitchFromGyroDegrees = imu.getAngleX();
@@ -87,16 +89,49 @@ float getPitchRadians(){
     return pitchRadians;
 }
 
+void emitTelemetry(unsigned long nowMs,
+    float effectivePitch,
+    float targetPitchRadians,
+    float pitchRateRadiansPerSecond,
+    float pitchIntegralValue,
+    float leftWheelVelocity,
+    float rightWheelVelocity,
+    float averageWheelVelocityForward,
+    float rcThrottle,
+    float rcSteer) {
+    if (!kEnableTelemetry) return;
+    if ((nowMs - lastTelemetryMs) < kTelemetryPeriodMs) return;
+
+    char telemetryLine[256];
+    const int n = snprintf(
+        telemetryLine,
+        sizeof(telemetryLine),
+        "pitch: %.3f rad, target_pitch: %.3f rad, pitch_rate: %.3f rad/s, pitch_integral: %.3f, wheel_fwd: %.3f rad/s, rc_throttle: %.2f, rc_steer: %.2f\n",
+        static_cast<double>(effectivePitch),
+        static_cast<double>(targetPitchRadians),
+        static_cast<double>(pitchRateRadiansPerSecond),
+        static_cast<double>(pitchIntegralValue),
+        static_cast<double>(averageWheelVelocityForward),
+        static_cast<double>(rcThrottle),
+        static_cast<double>(rcSteer));
+
+    if (n > 0 && n < static_cast<int>(sizeof(telemetryLine))) {
+        // Skip rather than block: motor loop timing is more important than telemetry.
+        if (Serial.availableForWrite() < n) return;
+        Serial.write(reinterpret_cast<const uint8_t*>(telemetryLine), static_cast<size_t>(n));
+        lastTelemetryMs = nowMs;
+    }
+}
+
 }  // namespace
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(kSerialBaudRate);
     delay(250);
     Serial.println("\nBalanceBot SimpleFOC boot");
 
     pinMode(39, INPUT);
     pinMode(36, INPUT);
-
 
     i2cLeft.begin(22, 19, 100000); 
     i2cRight.begin(32, 33, 100000);
@@ -167,15 +202,17 @@ void loop() {
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
-    if(!kEnableRcReceiver && (readRcChannel(39) > 0.3f || readRcChannel(36) > 0.3f || readRcChannel(36) < -0.3f))
+
+    const float rcThrottle = 0.0f; // readRcChannel(39);
+    const float rcSteer = 0.0f; // readRcChannel(36);
+
+    if(!kEnableRcReceiver && (rcThrottle > 0.3f || rcSteer > 0.3f || rcSteer < -0.3f))
     {
         Serial.println("Enabling RC control");
         kEnableRcReceiver = true;
     }
 
-    const float rcThrottle = kEnableRcReceiver ? readRcChannel(39) : 0.0f;
-    const float rcSteer = kEnableRcReceiver ? readRcChannel(36) : 0.0f;
-    const float targetPitchRadians = startupPitchReferenceRadians + (rcThrottle * kRcThrottleAngleGain);
+    const float targetPitchRadians = startupPitchReferenceRadians + ((kEnableRcReceiver ? rcThrottle : 0.0f) * kRcThrottleAngleGain);
     const float effectivePitch = wrappedAngleErrorRadians(pitchRadians, targetPitchRadians);
 
     // Integral: accumulate error over time, clamped to prevent windup
@@ -191,7 +228,7 @@ void loop() {
         - (kI * pitchIntegral)                     // Integral
         - (kD * pitchRateRadiansPerSecond)          // Derivative
         - (kWheelVelocityDampingGain * averageWheelVelocityForward);
-    const float steerTorque = rcSteer * kRcSteerTorqueGain;
+    const float steerTorque = (kEnableRcReceiver ? rcSteer : 0.0f)  * kRcSteerTorqueGain;
 
     float leftTorque = balanceTorqueTarget - steerTorque;
     float rightTorque = balanceTorqueTarget + steerTorque;
@@ -202,29 +239,17 @@ void loop() {
     leftMotor.move(kLeftMotorDirection * leftTorque);
     rightMotor.move(kRightMotorDirection * rightTorque);
 
-    if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
-        Serial.print("pitch:");
-        Serial.print(effectivePitch);
-        Serial.print(",targetPitch:");
-        Serial.print(targetPitchRadians);
-        Serial.print(",rate:");
-        Serial.print(pitchRateRadiansPerSecond);
-        Serial.print(",integral:");
-        Serial.print(pitchIntegral);
-        Serial.print(",wheelL:");
-        Serial.print(leftMotor.shaft_velocity);
-        Serial.print(",wheelR:");
-        Serial.print(rightMotor.shaft_velocity);
-        Serial.print(",wheelFwd:");
-        Serial.print(averageWheelVelocityForward);
-        Serial.print(",rcThrottle:");
-        Serial.print(readRcChannel(39));
-        Serial.print(",rcSteer:");
-        Serial.print(readRcChannel(36));
-
-        Serial.println("");
-        lastTelemetryMs = nowMs;
-    }
+    emitTelemetry(
+        nowMs,
+        effectivePitch,
+        targetPitchRadians,
+        pitchRateRadiansPerSecond,
+        pitchIntegral,
+        leftMotor.shaft_velocity,
+        rightMotor.shaft_velocity,
+        averageWheelVelocityForward,
+        rcThrottle,
+        rcSteer);
 }
 
 #endif // BALANCE_BOT_LOLIN32LITE_INO
