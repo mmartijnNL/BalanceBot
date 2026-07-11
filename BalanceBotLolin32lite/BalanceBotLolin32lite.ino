@@ -25,7 +25,7 @@ constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // Radio Control
 bool kEnableRcReceiver = false;
-constexpr float kRcThrottleAngleGain =  1.0f;
+constexpr float kRcThrottleAngleGain =  0.4f;
 constexpr float kRcSteerTorqueGain =    1.0f;
 
 constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
