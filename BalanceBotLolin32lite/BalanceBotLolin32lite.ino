@@ -9,19 +9,18 @@
 
 namespace {
 
+// PID tuning values
+constexpr float kP = 4.0f;  // Proportional: stiffness, how hard the bot fights tilt
+constexpr float kI = 0.0f;  // Integral: corrects steady-state lean / drift
+constexpr float kD = 0.01f;  // Derivative: damping, reduces oscillation
+
+constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
+constexpr float kWheelVelocityDampingGain = 0.06f;
 
 constexpr float kSupplyVoltage = 16.8f;         // 4S LiPo: full=16.8 low=14
 constexpr float kMotorVoltageLimit = 8.0f;
 constexpr float kLeftMotorDirection =   1.0f;   // Reverse if needed
 constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
-
-// PID tuning values
-constexpr float kP = 8.0f;  // Proportional: stiffness, how hard the bot fights tilt
-constexpr float kI = 0.1f;  // Integral: corrects steady-state lean / drift
-constexpr float kD = 0.1f;  // Derivative: damping, reduces oscillation
-
-constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
-constexpr float kWheelVelocityDampingGain = 0.06f;
 
 // Radio Control
 bool kEnableRcReceiver = false;
@@ -30,7 +29,7 @@ constexpr float kRcSteerTorqueGain =    1.6f;
 
 constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
 
-constexpr unsigned long kTelemetryPeriodMs = 100UL;
+constexpr unsigned long kTelemetryPeriodMs = 2UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
 constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
 
@@ -168,10 +167,10 @@ void loop() {
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
-    if(!kEnableRcReceiver && readRcChannel(39) > 0.3f)\
+    if(!kEnableRcReceiver && (readRcChannel(39) > 0.3f || readRcChannel(36) > 0.3f || readRcChannel(36) < 0.3f))
     {
-        kEnableRcReceiver = true;
         Serial.println("Enabling RC control");
+        kEnableRcReceiver = true;
     }
 
     const float rcThrottle = kEnableRcReceiver ? readRcChannel(39) : 0.0f;
@@ -204,23 +203,23 @@ void loop() {
     rightMotor.move(kRightMotorDirection * rightTorque);
 
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
-        Serial.print("pitch=");
+        Serial.print("pitch:");
         Serial.print(effectivePitch);
-        Serial.print(" targetPitch=");
+        Serial.print(",targetPitch:");
         Serial.print(targetPitchRadians);
-        Serial.print(" rate=");
+        Serial.print(",rate:");
         Serial.print(pitchRateRadiansPerSecond);
-        Serial.print(" integral=");
+        Serial.print(",integral:");
         Serial.print(pitchIntegral);
-        Serial.print(" wheelL=");
+        Serial.print(",wheelL:");
         Serial.print(leftMotor.shaft_velocity);
-        Serial.print(" wheelR=");
+        Serial.print(",wheelR:");
         Serial.print(rightMotor.shaft_velocity);
-        Serial.print(" wheelFwd=");
+        Serial.print(",wheelFwd:");
         Serial.print(averageWheelVelocityForward);
-        Serial.print(" rcThrottle=");
+        Serial.print(",rcThrottle:");
         Serial.print(readRcChannel(39));
-        Serial.print(" rcSteer=");
+        Serial.print(",rcSteer:");
         Serial.print(readRcChannel(36));
 
         Serial.println("");
