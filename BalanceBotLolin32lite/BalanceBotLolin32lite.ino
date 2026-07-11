@@ -29,7 +29,7 @@ constexpr float kRcSteerTorqueGain =    1.6f;
 
 constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
 
-constexpr unsigned long kTelemetryPeriodMs = 2UL;
+constexpr unsigned long kTelemetryPeriodMs = 10UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
 constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
 
@@ -167,7 +167,7 @@ void loop() {
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
-    if(!kEnableRcReceiver && (readRcChannel(39) > 0.3f || readRcChannel(36) > 0.3f || readRcChannel(36) < 0.3f))
+    if(!kEnableRcReceiver && (readRcChannel(39) > 0.3f || readRcChannel(36) > 0.3f || readRcChannel(36) < -0.3f))
     {
         Serial.println("Enabling RC control");
         kEnableRcReceiver = true;
