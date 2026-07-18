@@ -3,7 +3,7 @@
 #include <Wire.h>
 #include <cmath>
 
-namespace {
+// This is a temporary project to test the MPU6050. It should be kept simple.
 
 constexpr unsigned long kTelemetryPeriodMs = 100UL;
 
@@ -12,8 +12,9 @@ TwoWire i2cLeft = TwoWire(0);
 
 MPU6050 imu = MPU6050(i2cLeft);
 
-
-}  // namespace
+float readSelectedAxisAngleDeg() {
+    return degrees(atan2( imu.getAccX(), imu.getAccZ()));
+}
 
 void setup() {
     Serial.begin(460800);
@@ -42,12 +43,14 @@ void loop() {
 
     imu.update();
 
-    const float angleDeg = degrees(atan2(imu.getAccY(), imu.getAccZ()));
+    // Angle is the important value. It should be an angle around an axis.
+    float angle = readSelectedAxisAngleDeg();
 
+    // Do not change that we print all this.
     const unsigned long nowMs = millis();
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
         Serial.print("a:");
-        Serial.print(angleDeg);
+        Serial.print(angle);
         Serial.print(",acax:");
         Serial.print(imu.getAccAngleX());   // 1
         Serial.print(",acay:");
@@ -65,7 +68,6 @@ void loop() {
         Serial.print(",acy:");
         Serial.print(imu.getAccY());
         Serial.print(",acyo:");
-        Serial.print(imu.getAccYoffset());
         Serial.print(imu.getAccYoffset());
         Serial.print(",acz:");
         Serial.print(imu.getAccZ());
