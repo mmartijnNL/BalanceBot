@@ -27,6 +27,7 @@ void setup() {
         imuStatus = imu.begin();
     }
     
+    // Calibrate start angle
     imu.calcOffsets(true, true);
 
     imu.update();
@@ -40,13 +41,11 @@ float getAngle() {
     static bool initialized = false;
     static unsigned long lastMicros = 0;
     static float angle = 0.0f;
-    static float startAngle = 0.0f;
 
     const unsigned long nowMicros = micros();
     if (!initialized) {
         initialized = true;
         // Capture startup orientation as the zero reference.
-        startAngle = imu.getAngleX();
         lastMicros = nowMicros;
         return angle;
     }
@@ -54,15 +53,19 @@ float getAngle() {
     // Gyro output is in deg/s, so integrate over elapsed seconds.
     const float dt = (nowMicros - lastMicros) * 1.0e-6f;
     lastMicros = nowMicros;
-    angle += imu.getGyroX() * dt;
 
-    float relativeAngle = angle - startAngle;
+
+    // This gives the right output, but it drifts
+    //angle += imu.getGyroX() * dt;
+
+    // This does not drift, but the output is not correct. It ranges from 0 to 64ish. Forward and backward both give the same output of about 45.
+    angle = std::atan2(imu.getAccY(), imu.getAccZ()) * 180.0f / PI;
 
     // Keep output around zero for easier balancing logic.
-    while (relativeAngle >= 180.0f) relativeAngle -= 360.0f;
-    while (relativeAngle < -180.0f) relativeAngle += 360.0f;
+    while (angle >= 180.0f) angle -= 360.0f;
+    while (angle < -180.0f) angle += 360.0f;
 
-    return relativeAngle;
+    return angle;
 }
 
 void loop() {
