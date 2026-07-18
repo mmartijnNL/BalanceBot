@@ -16,7 +16,7 @@ MPU6050 imu = MPU6050(i2cLeft);
 }  // namespace
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(460800);
     delay(250);
     Serial.println("\nInitializing");
 
@@ -42,42 +42,43 @@ void loop() {
 
     imu.update();
 
-    float angle = atan2(imu.getAccY(), imu.getAccZ()) * (180.0 / PI);
+    const float angleDeg = degrees(atan2(imu.getAccY(), imu.getAccZ()));
 
     const unsigned long nowMs = millis();
     if ((nowMs - lastTelemetryMs) >= kTelemetryPeriodMs) {
-        Serial.print(angle);
-        Serial.print("\t");
+        Serial.print("a:");
+        Serial.print(angleDeg);
+        Serial.print(",acax:");
         Serial.print(imu.getAccAngleX());   // 1
-        Serial.print("\t");
+        Serial.print(",acay:");
         Serial.print(imu.getAccAngleY());   // 2
-        Serial.print("\t");
+        Serial.print(",ax:");
         Serial.print(imu.getAngleX());      // 3
-        Serial.print("\t");
+        Serial.print(",ay:");
         Serial.print(imu.getAngleY());      // 4
-        Serial.print("\t");
+        Serial.print(",az:");
         Serial.print(imu.getAngleZ());
-        Serial.print("\t");
+        Serial.print(",acx:");
         Serial.print(imu.getAccX());
-        Serial.print("\t");
+        Serial.print(",acxo:");
         Serial.print(imu.getAccXoffset());
-        Serial.print("\t");
+        Serial.print(",acy:");
         Serial.print(imu.getAccY());
-        Serial.print("\t");
+        Serial.print(",acyo:");
         Serial.print(imu.getAccYoffset());
-        Serial.print("\t");
+        Serial.print(imu.getAccYoffset());
+        Serial.print(",acz:");
         Serial.print(imu.getAccZ());
-        Serial.print("\t");
+        Serial.print(",aczo:");
         Serial.print(imu.getAccZoffset());
-        Serial.print("\t");
+        Serial.print(",gx");
         Serial.print(imu.getGyroX());
-        Serial.print("\t");
+        Serial.print(",gy");
         Serial.print(imu.getGyroY());
-        Serial.print("\t");
+        Serial.print(",gz");
         Serial.print(imu.getGyroZ());
-        Serial.print("\t");
+        Serial.print(",t");
         Serial.print(imu.getTemp());
-        Serial.print("\t");
    
         Serial.print("\n");  
         lastTelemetryMs = nowMs;

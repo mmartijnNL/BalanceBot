@@ -34,7 +34,15 @@ constexpr bool kEnableTelemetry = true;
 constexpr unsigned long kTelemetryPeriodMs = 50UL;
 constexpr unsigned long kSerialBaudRate = 460800UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
-constexpr float kPitchAngleBlend =      0.90f;  // 1.0=gyro-heavy, 0.0=accel-heavy
+constexpr float kRadiansToDegrees =     57.29577951308232f;
+
+// IMU angle reading
+// kPitchAxisIndex: 0 = rotate around X (uses accY/accZ, gyroX)
+//                  1 = rotate around Y (uses accX/accZ, gyroY)
+// Tilt the bot slowly forward and check which axis tracks it; swap if needed.
+constexpr int   kPitchAxisIndex = 1;     // 0 or 1 — change to match board mounting
+constexpr float kPitchSign      = 1.0f;  // Flip to -1 if angle is inverted vs real world
+constexpr float kCfAlpha        = 0.98f; // Complementary filter: 0.98 = heavy gyro trust
 
 TwoWire i2cLeft = TwoWire(0);
 TwoWire i2cRight = TwoWire(1);
@@ -54,17 +62,62 @@ float pitchIntegral = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
 unsigned long lastLoopMs = 0UL;
 
+// Complementary filter state
+float         cfPitchRadians  = 0.0f;
+unsigned long cfLastUpdateUs  = 0UL;
+bool          cfInitialized   = false;
+
 float clampAbs(float value, float limit) {
     if (value > limit) return limit;
     if (value < -limit) return -limit;
     return value;
 }
 
-float wrappedAngleErrorRadians(float angleRadians, float referenceRadians) {
-    float error = angleRadians - referenceRadians;
-    while (error > PI) error -= 2.0f * PI;
-    while (error < -PI) error += 2.0f * PI;
-    return error;
+struct PitchReading {
+    float radians;
+    float rateRadiansPerSecond;
+    float angleDegrees() const { return radians * kRadiansToDegrees; }
+    float rateDegreesPerSecond() const { return rateRadiansPerSecond * kRadiansToDegrees; }
+};
+
+PitchReading readPitch() {
+    imu.update();
+
+    // Raw values from MPU6050_light (offsets already applied by library)
+    // Accel in g units; gyro in deg/s
+    float accelTilt, gyroRateDegPerSec;
+    if (kPitchAxisIndex == 0) {
+        // Board tilts around X-axis: gravity component shifts between Y and Z
+        accelTilt        = imu.getAccY();
+        gyroRateDegPerSec = imu.getGyroX();
+    } else {
+        // Board tilts around Y-axis: gravity component shifts between X and Z
+        accelTilt        = imu.getAccX();
+        gyroRateDegPerSec = imu.getGyroY();
+    }
+    const float accelZ = imu.getAccZ();
+    const float gyroRateRadPerSec = gyroRateDegPerSec * kDegreesToRadians;
+
+    // Accelerometer-only angle: full -π..+π range, 0 = level
+    // Positive when the tilt-axis side rises, negative when it drops.
+    const float accPitchRadians = atan2f(-accelTilt, accelZ);
+
+    const unsigned long nowUs = micros();
+    if (!cfInitialized) {
+        cfPitchRadians = accPitchRadians;
+        cfInitialized  = true;
+    } else {
+        const float dt = static_cast<float>(nowUs - cfLastUpdateUs) * 1.0e-6f;
+        // Complementary filter: integrate gyro (fast response) + correct drift with accel
+        cfPitchRadians = kCfAlpha * (cfPitchRadians + gyroRateRadPerSec * dt)
+                       + (1.0f - kCfAlpha) * accPitchRadians;
+    }
+    cfLastUpdateUs = nowUs;
+
+    PitchReading reading;
+    reading.radians              = kPitchSign * cfPitchRadians;
+    reading.rateRadiansPerSecond = kPitchSign * gyroRateRadPerSec;
+    return reading;
 }
 
 // RC receiver state — written in ISRs, read in loop()
@@ -108,42 +161,27 @@ float getRcChannel(volatile unsigned long& pulseUs, volatile unsigned long& last
     return static_cast<float>(static_cast<long>(clamped) - static_cast<long>(kRcPulseCenter)) / 500.0f;
 }
 
-float getPitchRadians(){
-    imu.update();
-    const float pitchFromGyroDegrees = imu.getAngleX();
-    const float pitchFromAccDegrees = imu.getAccAngleX();
-    const float pitchRadians =
-        (kPitchAngleBlend * pitchFromGyroDegrees + (1.0f - kPitchAngleBlend) * pitchFromAccDegrees)
-        * kDegreesToRadians;
-    return pitchRadians;
-}
-
 void emitTelemetry(unsigned long nowMs,
-    float effectivePitch,
-    float targetPitchRadians,
-    float pitchRateRadiansPerSecond,
-    float pitchIntegralValue,
+    PitchReading pitchReading,
+    float targetPitch,
     float leftWheelVelocity,
-    float rightWheelVelocity,
-    float averageWheelVelocityForward,
-    float rcThrottle,
-    float rcSteer) {
+    float rightWheelVelocity) {
     if (!kEnableTelemetry) return;
     if ((nowMs - lastTelemetryMs) < kTelemetryPeriodMs) return;
+
+    const float targetPitchDegrees = targetPitch * kRadiansToDegrees;
 
     char telemetryLine[256];
     const int n = snprintf(
         telemetryLine,
         sizeof(telemetryLine),
         // Keep each line compact so it fits typical UART TX buffers without blocking.
-        "p:%.3f,tp:%.3f,pr:%.3f,pi:%.3f,w:%.3f,rt:%.2f,rs:%.2f\n",
-        static_cast<double>(effectivePitch),
-        static_cast<double>(targetPitchRadians),
-        static_cast<double>(pitchRateRadiansPerSecond),
-        static_cast<double>(pitchIntegralValue),
-        static_cast<double>(averageWheelVelocityForward),
-        static_cast<double>(rcThrottle),
-        static_cast<double>(rcSteer));
+        "p:%.2f,pr:%.2f,tp:%.2f,wl:%.3f,wr:%.3f\n",
+        static_cast<double>(pitchReading.angleDegrees()),
+        static_cast<double>(pitchReading.rateDegreesPerSecond()),
+        static_cast<double>(targetPitchDegrees),
+        static_cast<double>(leftWheelVelocity),
+        static_cast<double>(rightWheelVelocity));
 
     if (n > 0 && n < static_cast<int>(sizeof(telemetryLine))) {
         // Skip rather than block: motor loop timing is more important than telemetry.
@@ -213,7 +251,7 @@ void setup() {
     float startupPitchSum = 0.0f;
     constexpr int kStartupSamples = 120;
     for (int i = 0; i < kStartupSamples; ++i) {
-        startupPitchSum += getPitchRadians();
+        startupPitchSum += readPitch().radians;
         delay(2);
     }
     startupPitchReferenceRadians = startupPitchSum / static_cast<float>(kStartupSamples);
@@ -229,8 +267,9 @@ void loop() {
     leftMotor.loopFOC();
     rightMotor.loopFOC();
 
-    const float pitchRadians = getPitchRadians();
-    const float pitchRateRadiansPerSecond = imu.getGyroX() * kDegreesToRadians;
+    const PitchReading pitch = readPitch();
+    const float pitchRadians = pitch.radians;
+    const float pitchRateRadiansPerSecond = pitch.rateRadiansPerSecond;
 
     const unsigned long nowMs = millis();
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
@@ -247,7 +286,8 @@ void loop() {
     }
 
     const float targetPitchRadians = startupPitchReferenceRadians + ((kEnableRcReceiver ? rcThrottle : 0.0f) * kRcThrottleAngleGain);
-    const float effectivePitch = wrappedAngleErrorRadians(pitchRadians, targetPitchRadians);
+    // Pitch is a local balance angle, not a heading; use linear subtraction to avoid wrap-around flips.
+    const float effectivePitch = pitchRadians - targetPitchRadians;
 
     // Integral: accumulate error over time, clamped to prevent windup
     pitchIntegral += effectivePitch * dtSeconds;
@@ -275,15 +315,10 @@ void loop() {
 
     emitTelemetry(
         nowMs,
-        effectivePitch,
+        pitch,
         targetPitchRadians,
-        pitchRateRadiansPerSecond,
-        pitchIntegral,
-        leftMotor.shaft_velocity,
-        rightMotor.shaft_velocity,
-        averageWheelVelocityForward,
-        rcThrottle,
-        rcSteer);
+        leftWheelVelocityForward,
+        rightWheelVelocityForward);
 }
 
 #endif // BALANCE_BOT_LOLIN32LITE_INO
