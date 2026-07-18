@@ -15,7 +15,6 @@ constexpr float kP = 9.0f;  // Proportional: stiffness, how hard the bot fights 
 constexpr float kI = 0.0f;  // Integral: corrects steady-state lean / drift
 constexpr float kD = 0.02f;  // Derivative: damping, reduces oscillation
 
-constexpr float kIntegralClamp = 1.2f;       // Anti-windup: max magnitude of the integral term
 constexpr float kWheelVelocityDampingGain = 0.06f;
 
 constexpr float kSupplyVoltage = 16.8f;         // 4S LiPo: full=16.8 low=14
@@ -25,24 +24,14 @@ constexpr float kRightMotorDirection =  -1.0f;  // Reverse if needed
 
 // Radio Control
 bool kEnableRcReceiver = false;
-constexpr float kRcThrottleAngleGain =  0.4f;
-constexpr float kRcSteerTorqueGain =    1.0f;
-
-constexpr float kZeroDeadband = 0.05f;        // Ignore tiny commands that cause chatter
+constexpr float kRcThrottleAngleGain =  40.0f;
+constexpr float kRcSteerTorqueGain =    20.0f;
 
 constexpr bool kEnableTelemetry = true;
 constexpr unsigned long kTelemetryPeriodMs = 50UL;
 constexpr unsigned long kSerialBaudRate = 460800UL;
 constexpr float kDegreesToRadians =     0.017453292519943295f;
 constexpr float kRadiansToDegrees =     57.29577951308232f;
-
-// IMU angle reading
-// kPitchAxisIndex: 0 = rotate around X (uses accY/accZ, gyroX)
-//                  1 = rotate around Y (uses accX/accZ, gyroY)
-// Tilt the bot slowly forward and check which axis tracks it; swap if needed.
-constexpr int   kPitchAxisIndex = 1;     // 0 or 1 — change to match board mounting
-constexpr float kPitchSign      = 1.0f;  // Flip to -1 if angle is inverted vs real world
-constexpr float kCfAlpha        = 0.98f; // Complementary filter: 0.98 = heavy gyro trust
 
 TwoWire i2cLeft = TwoWire(0);
 TwoWire i2cRight = TwoWire(1);
@@ -57,15 +46,11 @@ BLDCDriver3PWM leftDriver = BLDCDriver3PWM(23, 18, 5, 17);
 BLDCMotor rightMotor = BLDCMotor(7);    // 7 pole pairs
 BLDCDriver3PWM rightDriver = BLDCDriver3PWM(25, 26, 27, 14);
 
-float startupPitchReferenceRadians = 0.0f;
-float pitchIntegral = 0.0f;
+float startAngle = 0.0f;
+float errorAngleIntegral = 0.0f;
+float lastErrorAngle = 0.0f;
 unsigned long lastTelemetryMs = 0UL;
 unsigned long lastLoopMs = 0UL;
-
-// Complementary filter state
-float         cfPitchRadians  = 0.0f;
-unsigned long cfLastUpdateUs  = 0UL;
-bool          cfInitialized   = false;
 
 float clampAbs(float value, float limit) {
     if (value > limit) return limit;
@@ -73,51 +58,29 @@ float clampAbs(float value, float limit) {
     return value;
 }
 
-struct PitchReading {
-    float radians;
-    float rateRadiansPerSecond;
-    float angleDegrees() const { return radians * kRadiansToDegrees; }
-    float rateDegreesPerSecond() const { return rateRadiansPerSecond * kRadiansToDegrees; }
-};
+// Returns an angle in degrees around an axis.
+float getAngle() {
+    static bool initialized = false;
+    static unsigned long lastMicros = 0;
+    static float angle = 0.0f;
 
-PitchReading readPitch() {
-    imu.update();
-
-    // Raw values from MPU6050_light (offsets already applied by library)
-    // Accel in g units; gyro in deg/s
-    float accelTilt, gyroRateDegPerSec;
-    if (kPitchAxisIndex == 0) {
-        // Board tilts around X-axis: gravity component shifts between Y and Z
-        accelTilt        = imu.getAccY();
-        gyroRateDegPerSec = imu.getGyroX();
-    } else {
-        // Board tilts around Y-axis: gravity component shifts between X and Z
-        accelTilt        = imu.getAccX();
-        gyroRateDegPerSec = imu.getGyroY();
+    const unsigned long nowMicros = micros();
+    if (!initialized) {
+        initialized = true;
+        lastMicros = nowMicros;
+        return angle;
     }
-    const float accelZ = imu.getAccZ();
-    const float gyroRateRadPerSec = gyroRateDegPerSec * kDegreesToRadians;
 
-    // Accelerometer-only angle: full -π..+π range, 0 = level
-    // Positive when the tilt-axis side rises, negative when it drops.
-    const float accPitchRadians = atan2f(-accelTilt, accelZ);
+    // Gyro output is in deg/s, so integrate over elapsed seconds.
+    const float dt = (nowMicros - lastMicros) * 1.0e-6f;
+    lastMicros = nowMicros;
+    angle += imu.getGyroX() * dt;
 
-    const unsigned long nowUs = micros();
-    if (!cfInitialized) {
-        cfPitchRadians = accPitchRadians;
-        cfInitialized  = true;
-    } else {
-        const float dt = static_cast<float>(nowUs - cfLastUpdateUs) * 1.0e-6f;
-        // Complementary filter: integrate gyro (fast response) + correct drift with accel
-        cfPitchRadians = kCfAlpha * (cfPitchRadians + gyroRateRadPerSec * dt)
-                       + (1.0f - kCfAlpha) * accPitchRadians;
-    }
-    cfLastUpdateUs = nowUs;
+    // Keep a single-turn representation.
+    while (angle >= 360.0f) angle -= 360.0f;
+    while (angle < 0.0f) angle += 360.0f;
 
-    PitchReading reading;
-    reading.radians              = kPitchSign * cfPitchRadians;
-    reading.rateRadiansPerSecond = kPitchSign * gyroRateRadPerSec;
-    return reading;
+    return angle;
 }
 
 // RC receiver state — written in ISRs, read in loop()
@@ -162,24 +125,21 @@ float getRcChannel(volatile unsigned long& pulseUs, volatile unsigned long& last
 }
 
 void emitTelemetry(unsigned long nowMs,
-    PitchReading pitchReading,
-    float targetPitch,
+    float angle,
+    float targetAngle,
     float leftWheelVelocity,
     float rightWheelVelocity) {
     if (!kEnableTelemetry) return;
     if ((nowMs - lastTelemetryMs) < kTelemetryPeriodMs) return;
-
-    const float targetPitchDegrees = targetPitch * kRadiansToDegrees;
 
     char telemetryLine[256];
     const int n = snprintf(
         telemetryLine,
         sizeof(telemetryLine),
         // Keep each line compact so it fits typical UART TX buffers without blocking.
-        "p:%.2f,pr:%.2f,tp:%.2f,wl:%.3f,wr:%.3f\n",
-        static_cast<double>(pitchReading.angleDegrees()),
-        static_cast<double>(pitchReading.rateDegreesPerSecond()),
-        static_cast<double>(targetPitchDegrees),
+        "angle:%.2f,target:%.2f,left:%.3f,right:%.3f\n",
+        static_cast<double>(angle),
+        static_cast<double>(targetAngle),
         static_cast<double>(leftWheelVelocity),
         static_cast<double>(rightWheelVelocity));
 
@@ -208,17 +168,17 @@ void setup() {
     i2cLeft.begin(22, 19, 100000); 
     i2cRight.begin(32, 33, 100000);
 
-    const byte imuStatus = imu.begin();
-    if (imuStatus != 0) {
+    byte imuStatus = imu.begin();
+    while (imuStatus != 0) {
         Serial.print("MPU6050 init failed, status=");
         Serial.println(static_cast<int>(imuStatus));
-    } else {
-        // Calibrate gyro while stationary. Accel offset calibration requires a flat/level pose,
-        // which is not true when the robot is held upright.
-        imu.calcOffsets(true, false);
+        imuStatus = imu.begin();
     }
+    
+    imu.calcOffsets(true, true);
 
     imu.update();
+
     leftSensor.init(&i2cLeft);
     rightSensor.init(&i2cRight);
 
@@ -247,78 +207,65 @@ void setup() {
     leftMotor.initFOC();
     rightMotor.initFOC();
 
-    // Capture current hold angle as startup target so control begins near zero torque.
-    float startupPitchSum = 0.0f;
-    constexpr int kStartupSamples = 120;
-    for (int i = 0; i < kStartupSamples; ++i) {
-        startupPitchSum += readPitch().radians;
-        delay(2);
-    }
-    startupPitchReferenceRadians = startupPitchSum / static_cast<float>(kStartupSamples);
+    // Init starting angle.
+    startAngle = getAngle();
+    Serial.print("StartAngle:");
+    Serial.println(startAngle);
 
+    // Init loop timing
     const unsigned long nowMs = millis();
     lastTelemetryMs = nowMs;
     lastLoopMs = nowMs;
 
-    Serial.println("SimpleFOC motors ready.");
+    Serial.println("Init done.");
 }
 
 void loop() {
     leftMotor.loopFOC();
     rightMotor.loopFOC();
 
-    const PitchReading pitch = readPitch();
-    const float pitchRadians = pitch.radians;
-    const float pitchRateRadiansPerSecond = pitch.rateRadiansPerSecond;
+    const float angle = getAngle();
 
     const unsigned long nowMs = millis();
     const float dtSeconds = static_cast<float>(nowMs - lastLoopMs) * 0.001f;
     lastLoopMs = nowMs;
 
-
     const float rcThrottle = getRcChannel(rcThrottlePulseUs, rcThrottleLastUpdateUs);
     const float rcSteer    = getRcChannel(rcSteerPulseUs,    rcSteerLastUpdateUs);
 
+    // Auto enable RC control.
     if(!kEnableRcReceiver && (rcThrottle > 0.3f || rcSteer > 0.3f || rcSteer < -0.3f))
     {
         Serial.println("Enabling RC control");
         kEnableRcReceiver = true;
     }
 
-    const float targetPitchRadians = startupPitchReferenceRadians + ((kEnableRcReceiver ? rcThrottle : 0.0f) * kRcThrottleAngleGain);
-    // Pitch is a local balance angle, not a heading; use linear subtraction to avoid wrap-around flips.
-    const float effectivePitch = pitchRadians - targetPitchRadians;
+    const float targetAngle = startAngle + ((kEnableRcReceiver ? rcThrottle : 0.0f) * kRcThrottleAngleGain);
+    const float errorAngle = angle - targetAngle;
 
     // Integral: accumulate error over time, clamped to prevent windup
-    pitchIntegral += effectivePitch * dtSeconds;
-    pitchIntegral = clampAbs(pitchIntegral, kIntegralClamp);
-
-    const float leftWheelVelocityForward = kLeftMotorDirection * leftMotor.shaft_velocity;
-    const float rightWheelVelocityForward = kRightMotorDirection * rightMotor.shaft_velocity;
-    const float averageWheelVelocityForward = 0.5f * (leftWheelVelocityForward + rightWheelVelocityForward);
+    errorAngleIntegral += errorAngle * dtSeconds;
+    lastErrorAngle = errorAngle;
 
     const float balanceTorqueTarget =
-        (-kP * effectivePitch)                     // Proportional
-        - (kI * pitchIntegral)                     // Integral
-        - (kD * pitchRateRadiansPerSecond)          // Derivative
-        - (kWheelVelocityDampingGain * averageWheelVelocityForward);
+        (-kP * errorAngle)                     // Proportional
+        - (kI * errorAngleIntegral)                     // Integral
+        - (kD * (errorAngle - lastErrorAngle) / dtSeconds);          // Derivative
+        
     const float steerTorque = (kEnableRcReceiver ? rcSteer : 0.0f)  * kRcSteerTorqueGain;
 
     float leftTorque = balanceTorqueTarget - steerTorque;
     float rightTorque = balanceTorqueTarget + steerTorque;
-
-    if (fabsf(leftTorque) < kZeroDeadband) leftTorque = 0.0f;
-    if (fabsf(rightTorque) < kZeroDeadband) rightTorque = 0.0f;
 
     leftMotor.move(kLeftMotorDirection * leftTorque);
     rightMotor.move(kRightMotorDirection * rightTorque);
 
     emitTelemetry(
         nowMs,
-        pitch,
-        targetPitchRadians,
-        leftWheelVelocityForward,
-        rightWheelVelocityForward);
+        angle,
+        targetAngle,
+        leftMotor.shaft_velocity,
+        rightMotor.shaft_velocity);
 }
 
 #endif // BALANCE_BOT_LOLIN32LITE_INO
