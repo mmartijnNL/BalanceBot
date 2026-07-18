@@ -37,7 +37,27 @@ void setup() {
 
 // Returns an angle in degrees around an axis.
 float getAngle() {
-    return degrees(atan2( imu.getAccX(), imu.getAccZ()));
+    static bool initialized = false;
+    static unsigned long lastMicros = 0;
+    static float angleDeg = 0.0f;
+
+    const unsigned long nowMicros = micros();
+    if (!initialized) {
+        initialized = true;
+        lastMicros = nowMicros;
+        return angleDeg;
+    }
+
+    // Gyro output is in deg/s, so integrate over elapsed seconds.
+    const float dt = (nowMicros - lastMicros) * 1.0e-6f;
+    lastMicros = nowMicros;
+    angleDeg += imu.getGyroX() * dt;
+
+    // Keep a single-turn representation.
+    while (angleDeg >= 360.0f) angleDeg -= 360.0f;
+    while (angleDeg < 0.0f) angleDeg += 360.0f;
+
+    return angleDeg;
 }
 
 void loop() {
