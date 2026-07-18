@@ -39,25 +39,30 @@ void setup() {
 float getAngle() {
     static bool initialized = false;
     static unsigned long lastMicros = 0;
-    static float angleDeg = 0.0f;
+    static float angle = 0.0f;
+    static float startAngle = 0.0f;
 
     const unsigned long nowMicros = micros();
     if (!initialized) {
         initialized = true;
+        // Capture startup orientation as the zero reference.
+        startAngle = imu.getAngleX();
         lastMicros = nowMicros;
-        return angleDeg;
+        return angle;
     }
 
     // Gyro output is in deg/s, so integrate over elapsed seconds.
     const float dt = (nowMicros - lastMicros) * 1.0e-6f;
     lastMicros = nowMicros;
-    angleDeg += imu.getGyroX() * dt;
+    angle += imu.getGyroX() * dt;
 
-    // Keep a single-turn representation.
-    while (angleDeg >= 360.0f) angleDeg -= 360.0f;
-    while (angleDeg < 0.0f) angleDeg += 360.0f;
+    float relativeAngle = angle - startAngle;
 
-    return angleDeg;
+    // Keep output around zero for easier balancing logic.
+    while (relativeAngle >= 180.0f) relativeAngle -= 360.0f;
+    while (relativeAngle < -180.0f) relativeAngle += 360.0f;
+
+    return relativeAngle;
 }
 
 void loop() {

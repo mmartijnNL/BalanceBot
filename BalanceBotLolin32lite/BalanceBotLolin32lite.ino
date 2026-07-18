@@ -224,6 +224,8 @@ void loop() {
     leftMotor.loopFOC();
     rightMotor.loopFOC();
 
+    imu.update();
+
     const float angle = getAngle();
 
     const unsigned long nowMs = millis();
@@ -243,22 +245,23 @@ void loop() {
     const float targetAngle = startAngle + ((kEnableRcReceiver ? rcThrottle : 0.0f) * kRcThrottleAngleGain);
     const float errorAngle = angle - targetAngle;
 
-    // Integral: accumulate error over time, clamped to prevent windup
+    // Integral: accumulate error over time
     errorAngleIntegral += errorAngle * dtSeconds;
-    lastErrorAngle = errorAngle;
 
     const float balanceTorqueTarget =
         (-kP * errorAngle)                     // Proportional
         - (kI * errorAngleIntegral)                     // Integral
         - (kD * (errorAngle - lastErrorAngle) / dtSeconds);          // Derivative
+
+    lastErrorAngle = errorAngle;
         
     const float steerTorque = (kEnableRcReceiver ? rcSteer : 0.0f)  * kRcSteerTorqueGain;
 
     float leftTorque = balanceTorqueTarget - steerTorque;
     float rightTorque = balanceTorqueTarget + steerTorque;
 
-    leftMotor.move(kLeftMotorDirection * leftTorque);
-    rightMotor.move(kRightMotorDirection * rightTorque);
+    // leftMotor.move(kLeftMotorDirection * leftTorque);
+    // rightMotor.move(kRightMotorDirection * rightTorque);
 
     emitTelemetry(
         nowMs,
